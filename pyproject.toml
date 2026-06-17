@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sigscout"
+version = "0.1.0"
+description = "Signal peptide discovery, screening, clustering, and export workbench."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.56,<2",
+    "pandas>=2.3,<3",
+    "pydantic>=2.10,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+sigscout = "sigscout.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
