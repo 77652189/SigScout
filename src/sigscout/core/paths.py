@@ -36,6 +36,11 @@ class ProjectPaths:
         configured = os.environ.get("USPNET_REPO")
         if configured:
             return Path(configured)
-        candidate = self.root.parent / "USPNet"
-        return candidate if candidate.exists() else None
-
+        for candidate in (
+            self.root / "external" / "USPNet",
+            self.root / "externals" / "USPNet",
+            self.root.parent / "USPNet",
+        ):
+            if candidate.exists():
+                return candidate
+        return None

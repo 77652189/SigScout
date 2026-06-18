@@ -7,11 +7,16 @@ from pathlib import Path
 
 import pandas as pd
 
+from sigscout.adapters.quickgo import QuickGOAnnotationSource
 from sigscout.adapters.uspnet import USPNetAdapter
 from sigscout.core.models import UniProtCandidateLibraryResult
 from sigscout.services.exports import write_candidate_fasta, write_csv, write_json, write_signal_peptide_fasta
 from sigscout.services.library import SignalPeptideLibraryService
 from sigscout.services.rules import score_signal_peptide
+from sigscout.services.source_protein_annotation import (
+    annotate_source_protein_routes,
+    ensure_source_protein_annotation_defaults,
+)
 
 
 UNIPROT_CANDIDATES_CSV = "uniprot_candidates.csv"
@@ -53,10 +58,16 @@ class SignalPeptideScreeningService:
         *,
         library_service: SignalPeptideLibraryService | None = None,
         uspnet_adapter: USPNetAdapter | None = None,
+        quickgo_source: QuickGOAnnotationSource | None = None,
+        target_key: str = "opn",
+        target_label: str = "OPN / 骨桥蛋白",
     ) -> None:
         self.output_dir = output_dir
         self.library_service = library_service or SignalPeptideLibraryService()
         self.uspnet_adapter = uspnet_adapter or USPNetAdapter()
+        self.quickgo_source = quickgo_source or QuickGOAnnotationSource()
+        self.target_key = target_key
+        self.target_label = target_label
 
     def discover_and_persist_uniprot_candidates(
         self,
@@ -66,11 +77,28 @@ class SignalPeptideScreeningService:
         reviewed_only: bool = False,
         exclude_existing: bool = True,
     ) -> UniProtCandidateLibraryResult:
+        query_at = _now_iso()
         discovery = self.library_service.discover_uniprot_candidate_library(
             taxon_id=taxon_id,
             max_records=max_records,
             reviewed_only=reviewed_only,
             exclude_existing=exclude_existing,
+        )
+        discovery = _with_query_at(discovery, query_at)
+        discovery = UniProtCandidateLibraryResult(
+            rows=[_ensure_target_context(row, self.target_key, self.target_label) for row in discovery.rows],
+            source_url=discovery.source_url,
+            errors=discovery.errors,
+            initial_hit_count=discovery.initial_hit_count,
+            fetched_record_count=discovery.fetched_record_count,
+            extracted_signal_count=discovery.extracted_signal_count,
+            deduplicated_count=discovery.deduplicated_count,
+            duplicate_count=discovery.duplicate_count,
+            duplicate_rows=[
+                _ensure_target_context(row, self.target_key, self.target_label)
+                for row in discovery.duplicate_rows
+            ],
+            query_at=discovery.query_at,
         )
         self._persist_uniprot_discovery(
             discovery,
@@ -93,11 +121,14 @@ class SignalPeptideScreeningService:
         except (OSError, ValueError, pd.errors.ParserError):
             return None
         rows = _ensure_similarity_grouping(rows)
+        rows = [_ensure_target_context(row, self.target_key, self.target_label) for row in rows]
         representative_rows = _representative_model_rows(rows)
         if rows and (not paths["representatives_csv"].exists() or not paths["representatives_fasta"].exists()):
             write_csv(paths["representatives_csv"], representative_rows)
             write_signal_peptide_fasta(paths["representatives_fasta"], representative_rows)
         summary = {key: value for key, value in payload.items() if key not in {"message", "errors"}}
+        summary.setdefault("target_key", self.target_key)
+        summary.setdefault("target_label", self.target_label)
         summary.setdefault("uniprot_candidate_source", "本地已保存的方法比较结果")
         summary.setdefault("uniprot_reused_from_disk", True)
         for key, value in _rules_score_distribution(rows).items():
@@ -134,12 +165,13 @@ class SignalPeptideScreeningService:
         max_records: int = 300,
         reviewed_only: bool = False,
         timeout_seconds: int = 3600,
+        refresh_uniprot: bool = False,
     ) -> SignalPeptideScreeningResult:
         paths = self._output_paths()
         output_dir = paths["output_dir"]
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        persisted_discovery = self._load_persisted_uniprot_discovery(
+        persisted_discovery = None if refresh_uniprot else self._load_persisted_uniprot_discovery(
             taxon_id=taxon_id,
             max_records=max_records,
             reviewed_only=reviewed_only,
@@ -152,14 +184,21 @@ class SignalPeptideScreeningService:
             reviewed_only=reviewed_only,
             exclude_existing=True,
         )
-        candidate_rows = discovery.rows
+        candidate_rows = [
+            _ensure_screening_row_defaults(_ensure_target_context(row, self.target_key, self.target_label))
+            for row in discovery.rows
+        ]
         write_candidate_fasta(paths["input_fasta"], candidate_rows)
 
         errors = list(discovery.errors)
         summary: dict[str, object] = {
+            "target_key": self.target_key,
+            "target_label": self.target_label,
             "taxon_id": taxon_id,
             "reviewed_only": reviewed_only,
             "max_records": max_records,
+            "uniprot_query_at": discovery.query_at,
+            "screening_run_at": _now_iso(),
             "uniprot_initial_hits": discovery.initial_hit_count,
             "uniprot_fetched_records": discovery.fetched_record_count,
             "uniprot_extracted_signal_count": discovery.extracted_signal_count,
@@ -272,6 +311,81 @@ class SignalPeptideScreeningService:
             errors=errors,
         )
 
+    def annotate_persisted_source_proteins(self, *, use_quickgo: bool = False) -> dict[str, object]:
+        paths = self._output_paths()
+        annotated_any = False
+        summary_update: dict[str, object] = {}
+        rows_by_path: dict[str, list[dict[str, object]]] = {}
+        for key in ("uniprot_csv", "duplicate_csv", "comparison_csv"):
+            path = paths[key]
+            if path.exists():
+                rows_by_path[key] = _read_csv_rows(path)
+
+        quickgo_annotations_by_accession: dict[str, list[dict[str, object]]] | None = None
+        quickgo_ancestors_by_id: dict[str, set[str]] = {}
+        quickgo_terms_by_id: dict[str, str] = {}
+        quickgo_errors: list[str] = []
+        quickgo_query_at = ""
+        if use_quickgo and rows_by_path:
+            accessions = {
+                str(row.get("accession", "")).strip()
+                for rows in rows_by_path.values()
+                for row in rows
+                if str(row.get("accession", "")).strip()
+            }
+            quickgo_result = self.quickgo_source.fetch_cellular_component_annotations(accessions)
+            quickgo_annotations_by_accession = quickgo_result.annotations_by_accession
+            quickgo_ancestors_by_id = quickgo_result.go_ancestors_by_id
+            quickgo_terms_by_id = quickgo_result.go_terms_by_id
+            quickgo_errors = quickgo_result.errors
+            quickgo_query_at = quickgo_result.query_at
+
+        annotation_kwargs = {
+            "quickgo_annotations_by_accession": quickgo_annotations_by_accession,
+            "go_ancestors_by_id": quickgo_ancestors_by_id,
+            "go_terms_by_id": quickgo_terms_by_id,
+            "quickgo_query_at": quickgo_query_at,
+            "quickgo_errors": quickgo_errors,
+        }
+
+        if "uniprot_csv" in rows_by_path:
+            result = annotate_source_protein_routes(rows_by_path["uniprot_csv"], **annotation_kwargs)
+            write_csv(paths["uniprot_csv"], result.rows)
+            summary_update.update(result.summary)
+            annotated_any = True
+
+        if "duplicate_csv" in rows_by_path:
+            result = annotate_source_protein_routes(rows_by_path["duplicate_csv"], **annotation_kwargs)
+            write_csv(paths["duplicate_csv"], result.rows)
+            annotated_any = True
+
+        if "comparison_csv" in rows_by_path:
+            result = annotate_source_protein_routes(rows_by_path["comparison_csv"], **annotation_kwargs)
+            comparison_rows = _ensure_similarity_grouping([_ensure_screening_row_defaults(row) for row in result.rows])
+            representative_rows = _representative_model_rows(comparison_rows)
+            write_csv(paths["comparison_csv"], comparison_rows)
+            write_csv(paths["representatives_csv"], representative_rows)
+            summary_update.update(result.summary)
+            annotated_any = True
+
+        if annotated_any:
+            summary_payload = _read_json_dict(paths["summary_json"])
+            if summary_payload:
+                write_json(paths["summary_json"], {**summary_payload, **summary_update})
+            discovery_payload = _read_json_dict(paths["discovery_summary_json"])
+            if discovery_payload:
+                write_json(paths["discovery_summary_json"], {**discovery_payload, **summary_update})
+            return {
+                **summary_update,
+                "success": True,
+                "message": f"已完成来源蛋白辅助评估：{summary_update.get('source_protein_annotated_count', 0)} 条。",
+            }
+
+        return {
+            "success": False,
+            "message": "没有找到可评估的候选 CSV；请先刷新毕赤酵母信号肽筛选结果。",
+        }
+
     def _output_paths(self) -> dict[str, Path]:
         output_dir = self.output_dir
         return {
@@ -308,6 +422,7 @@ class SignalPeptideScreeningService:
                 "reviewed_only": reviewed_only,
                 "exclude_existing": exclude_existing,
                 "source_url": discovery.source_url,
+                "query_at": discovery.query_at,
                 "initial_hit_count": discovery.initial_hit_count,
                 "fetched_record_count": discovery.fetched_record_count,
                 "extracted_signal_count": discovery.extracted_signal_count,
@@ -352,6 +467,7 @@ class SignalPeptideScreeningService:
             deduplicated_count=_safe_int_value(summary.get("deduplicated_count", len(rows))),
             duplicate_count=_safe_int_value(summary.get("duplicate_count", len(duplicate_rows))),
             duplicate_rows=duplicate_rows,
+            query_at=str(summary.get("query_at", "")),
         )
 
 
@@ -545,6 +661,35 @@ def _representative_model_rows(rows: list[dict[str, object]]) -> list[dict[str, 
     ]
 
 
+def _ensure_target_context(row: dict[str, object], target_key: str, target_label: str) -> dict[str, object]:
+    return {
+        **row,
+        "target_key": str(row.get("target_key") or target_key),
+        "target_label": str(row.get("target_label") or target_label),
+    }
+
+
+def _with_query_at(discovery: UniProtCandidateLibraryResult, query_at: str) -> UniProtCandidateLibraryResult:
+    if discovery.query_at:
+        return discovery
+    return UniProtCandidateLibraryResult(
+        rows=discovery.rows,
+        source_url=discovery.source_url,
+        errors=discovery.errors,
+        initial_hit_count=discovery.initial_hit_count,
+        fetched_record_count=discovery.fetched_record_count,
+        extracted_signal_count=discovery.extracted_signal_count,
+        deduplicated_count=discovery.deduplicated_count,
+        duplicate_count=discovery.duplicate_count,
+        duplicate_rows=discovery.duplicate_rows,
+        query_at=query_at,
+    )
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 def _read_json_dict(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -557,7 +702,10 @@ def _read_json_dict(path: Path) -> dict[str, object]:
 def _read_csv_rows(path: Path) -> list[dict[str, object]]:
     if not path.exists():
         return []
-    frame = pd.read_csv(path).fillna("")
+    try:
+        frame = pd.read_csv(path).fillna("")
+    except pd.errors.EmptyDataError:
+        return []
     return [_coerce_row_types(row) for row in frame.to_dict(orient="records")]
 
 
@@ -608,7 +756,7 @@ def _ensure_screening_row_defaults(row: dict[str, object]) -> dict[str, object]:
     updated.setdefault("representative_id", "")
     updated.setdefault("similarity_to_representative", 0.0)
     updated.setdefault("similar_group_size", 1)
-    return updated
+    return ensure_source_protein_annotation_defaults(updated)
 
 
 def _ensure_similarity_grouping(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -674,21 +822,29 @@ def _rules_score_note(score: int, passed: bool) -> str:
 
 
 def _uspnet_prediction_label(predicted_type: str) -> str:
-    if predicted_type == "SP":
-        return "SP：USPNet 判断为信号肽"
-    if predicted_type == "NO_SP":
-        return "NO_SP：USPNet 不支持信号肽"
-    if predicted_type:
-        return f"{predicted_type}：USPNet 原始类别"
+    prediction = predicted_type.strip().upper()
+    labels = {
+        "SP": "SP：经典 Sec/SPI 信号肽（默认通过）",
+        "NO_SP": "NO_SP：USPNet 不支持信号肽",
+        "LIPO": "LIPO：脂蛋白信号肽（非默认目标）",
+        "TAT": "TAT：Tat 通路信号肽（非默认目标）",
+        "TATLIPO": "TATLIPO：Tat 脂蛋白信号肽（非默认目标）",
+        "PILIN": "PILIN：菌毛相关信号肽（非默认目标）",
+    }
+    if prediction:
+        return labels.get(prediction, f"{prediction}：USPNet 原始类别")
     return "未运行"
 
 
 def _uspnet_interpretation(predicted_type: str, passed: bool) -> str:
+    prediction = predicted_type.strip().upper()
     if passed:
-        return "机器学习复核支持该序列具有信号肽特征。"
-    if predicted_type == "NO_SP":
+        return "USPNet 支持该序列为经典 Sec/SPI 信号肽，符合本项目默认筛选目标。"
+    if prediction == "NO_SP":
         return "机器学习复核不支持该序列作为信号肽，建议降级或人工复核。"
-    if predicted_type:
+    if prediction in {"LIPO", "TAT", "TATLIPO", "PILIN"}:
+        return "USPNet 判断为信号相关但非经典 Sec/SPI 类型；用于毕赤酵母常规分泌表达时不作为默认通过。"
+    if prediction:
         return "USPNet 给出非 SP 类别，需结合规则和来源证据人工判断。"
     return "尚未得到 USPNet 预测结果。"
 
@@ -705,4 +861,3 @@ def _screening_message(summary: dict[str, object]) -> str:
     if summary["uspnet_available"]:
         return base + "USPNet 已检测到，但本次运行未完成，因此没有一致通过结论。"
     return base + "USPNet 尚未安装，因此当前结果来自 UniProt 注释和透明规则筛选。"
-

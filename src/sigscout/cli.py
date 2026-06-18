@@ -7,8 +7,11 @@ from pathlib import Path
 
 from sigscout.adapters.uspnet import USPNetAdapter
 from sigscout.core.paths import ProjectPaths
-from sigscout.presets.opn import DEFAULT_TAXON_ID, opn_library_service
+from sigscout.services.library import SignalPeptideLibraryService
 from sigscout.services.screening import SignalPeptideScreeningService
+
+
+DEFAULT_TAXON_ID = 4922
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,11 +25,14 @@ def main(argv: list[str] | None = None) -> int:
     discover.add_argument("--output-dir", type=Path)
 
     screen = subparsers.add_parser("screen", help="Run rule screening and optional USPNet review.")
-    screen.add_argument("--preset", choices=["opn"], default="opn")
     screen.add_argument("--taxon-id", type=int, default=DEFAULT_TAXON_ID)
     screen.add_argument("--max-records", type=int, default=300)
     screen.add_argument("--reviewed-only", action="store_true")
     screen.add_argument("--output-dir", type=Path)
+
+    annotate = subparsers.add_parser("annotate-source", help="Annotate saved source protein routes.")
+    annotate.add_argument("--output-dir", type=Path)
+    annotate.add_argument("--quickgo", action="store_true", help="Fetch QuickGO/GOA cellular component evidence.")
 
     serve = subparsers.add_parser("serve", help="Start the Streamlit workbench.")
     serve.add_argument("--port", type=int, default=8506)
@@ -36,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = ProjectPaths.discover()
 
     if args.command == "discover":
-        service = _opn_screening_service(paths, args.output_dir)
+        service = _pichia_screening_service(paths, args.output_dir)
         result = service.discover_and_persist_uniprot_candidates(
             taxon_id=args.taxon_id,
             max_records=args.max_records,
@@ -50,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not result.errors else 1
 
     if args.command == "screen":
-        service = _opn_screening_service(paths, args.output_dir)
+        service = _pichia_screening_service(paths, args.output_dir)
         result = service.screen_uniprot_candidates(
             taxon_id=args.taxon_id,
             max_records=args.max_records,
@@ -59,6 +65,13 @@ def main(argv: list[str] | None = None) -> int:
         print(result.message)
         print(f"输出目录：{result.output_dir}")
         return 0 if result.success else 1
+
+    if args.command == "annotate-source":
+        service = _pichia_screening_service(paths, args.output_dir)
+        result = service.annotate_persisted_source_proteins(use_quickgo=args.quickgo)
+        print(result["message"])
+        print(f"输出目录：{service.output_dir}")
+        return 0 if result.get("success") else 1
 
     if args.command == "serve":
         app = paths.root / "src" / "sigscout" / "ui" / "streamlit_app.py"
@@ -81,11 +94,13 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _opn_screening_service(paths: ProjectPaths, output_dir: Path | None) -> SignalPeptideScreeningService:
+def _pichia_screening_service(paths: ProjectPaths, output_dir: Path | None) -> SignalPeptideScreeningService:
     return SignalPeptideScreeningService(
         output_dir or paths.opn_screening_output_dir,
-        library_service=opn_library_service(),
+        library_service=SignalPeptideLibraryService(candidate_prefix="PICHIA_UNIPROT"),
         uspnet_adapter=USPNetAdapter(repo_dir=paths.uspnet_repo),
+        target_key="pichia_signal_peptide_library",
+        target_label="毕赤酵母信号肽库",
     )
 
 

@@ -1,4 +1,7 @@
-param([switch]$ConfigureFirewallOnly)
+param(
+    [switch]$ConfigureFirewallOnly,
+    [switch]$ForceRestart
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -43,12 +46,40 @@ function Ensure-FirewallRule {
     }
 }
 
+function Test-ListeningOnLan {
+    $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    foreach ($connection in $connections) {
+        $address = [string]$connection.LocalAddress
+        if ($address -eq "0.0.0.0" -or $address -eq "::" -or ($address -notlike "127.*" -and $address -ne "::1")) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-PortOwner {
     $connection = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $connection) {
         return $null
     }
     return Get-CimInstance Win32_Process -Filter "ProcessId=$($connection.OwningProcess)" -ErrorAction SilentlyContinue
+}
+
+function Stop-PortOwner {
+    $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($processId in $processIds) {
+        if (-not $processId) {
+            continue
+        }
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+        $commandLine = [string]$process.CommandLine
+        $isThisApp = ($commandLine -like "*src/sigscout/ui/streamlit_app.py*" -or $commandLine -like "*src\sigscout\ui\streamlit_app.py*")
+        if ($isThisApp) {
+            Write-Host "Stopping old SigScout process on port $port (PID $processId)..." -ForegroundColor Yellow
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Test-HealthOk {
@@ -85,7 +116,11 @@ $owner = Get-PortOwner
 if ($owner) {
     $commandLine = [string]$owner.CommandLine
     $isThisApp = ($commandLine -like "*src/sigscout/ui/streamlit_app.py*" -or $commandLine -like "*src\sigscout\ui\streamlit_app.py*")
-    if ($isThisApp -and (Test-HealthOk)) {
+    if ($ForceRestart -and $isThisApp) {
+        Stop-PortOwner
+        Start-Sleep -Seconds 2
+        $owner = Get-PortOwner
+    } elseif ($isThisApp -and (Test-HealthOk) -and (Test-ListeningOnLan)) {
         Write-Host ""
         Write-Host "$projectName is already running. No need to start it again." -ForegroundColor Green
         Write-Host "LAN URLs:" -ForegroundColor Green
@@ -94,15 +129,23 @@ if ($owner) {
         Write-Host "Local URL: http://127.0.0.1:$port" -ForegroundColor Green
         Write-Host ""
         exit 0
+    } elseif ($isThisApp -and (Test-HealthOk) -and -not (Test-ListeningOnLan)) {
+        Write-Host ""
+        Write-Host "$projectName is running on localhost only. Restarting it for LAN access..." -ForegroundColor Yellow
+        Stop-PortOwner
+        Start-Sleep -Seconds 2
+        $owner = Get-PortOwner
     }
 
-    Write-Host ""
-    Write-Host "Port $port is already in use. Cannot start $projectName." -ForegroundColor Red
-    Write-Host "Owner PID: $($owner.ProcessId)" -ForegroundColor Yellow
-    Write-Host "Owner command: $commandLine" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "If this is an old project service, close that window or stop that process first." -ForegroundColor Yellow
-    exit 1
+    if ($owner) {
+        Write-Host ""
+        Write-Host "Port $port is already in use. Cannot start $projectName." -ForegroundColor Red
+        Write-Host "Owner PID: $($owner.ProcessId)" -ForegroundColor Yellow
+        Write-Host "Owner command: $([string]$owner.CommandLine)" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "If this is an old project service, close that window or run recover_SigScout_lan.bat." -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
@@ -118,4 +161,3 @@ Write-Host "To stop the service, close this window or press Ctrl+C." -Foreground
 Write-Host ""
 
 & $python -m streamlit run $appPath --server.address=0.0.0.0 --server.port=$port
-

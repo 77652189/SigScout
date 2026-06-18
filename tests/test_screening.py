@@ -28,6 +28,17 @@ def test_signal_peptide_screening_compares_rules_and_uspnet(tmp_path: Path) -> N
     assert result.summary["uspnet_completed"] == 2
     assert result.summary["uspnet_passed"] == 1
     assert result.summary["consensus_passed"] == 1
+    assert result.summary["target_key"] == "opn"
+    assert result.summary["target_label"] == "OPN / 骨桥蛋白"
+    assert result.summary["uniprot_query_at"]
+    assert all(row["target_key"] == "opn" for row in result.rows)
+    assert all(row["target_label"] == "OPN / 骨桥蛋白" for row in result.rows)
+    rows_by_id = {row["candidate_id"]: row for row in result.rows}
+    assert rows_by_id["OPN_UNIPROT_X12345"]["uspnet_prediction_label"] == "SP：经典 Sec/SPI 信号肽（默认通过）"
+    assert rows_by_id["OPN_UNIPROT_X12345"]["uspnet_cleavage_sequence"] == "MKALLLALLALAAASAGA"
+    assert rows_by_id["OPN_UNIPROT_LOW"]["uspnet_prediction"] == "LIPO"
+    assert rows_by_id["OPN_UNIPROT_LOW"]["uspnet_pass"] is False
+    assert "非经典 Sec/SPI" in rows_by_id["OPN_UNIPROT_LOW"]["uspnet_interpretation"]
     assert result.comparison_csv and result.comparison_csv.exists()
     assert result.representatives_csv and result.representatives_csv.exists()
     assert result.representatives_fasta and result.representatives_fasta.exists()
@@ -91,6 +102,46 @@ def test_screening_writes_representative_outputs(tmp_path: Path) -> None:
     assert result.representatives_fasta.read_text(encoding="utf-8").count(">") == 1
 
 
+def test_screening_refreshes_uniprot_candidates_when_requested(tmp_path: Path) -> None:
+    library_service = CountingLibraryService()
+    service = SignalPeptideScreeningService(
+        tmp_path,
+        library_service=library_service,
+        uspnet_adapter=FakeMissingUSPNetAdapter(),
+    )
+
+    first = service.screen_uniprot_candidates(max_records=2)
+    reused = service.screen_uniprot_candidates(max_records=2)
+    refreshed = service.screen_uniprot_candidates(max_records=2, refresh_uniprot=True)
+
+    assert library_service.calls == 2
+    assert first.summary["uniprot_reused_from_disk"] is False
+    assert reused.summary["uniprot_reused_from_disk"] is True
+    assert refreshed.summary["uniprot_reused_from_disk"] is False
+    assert first.summary["uniprot_query_at"]
+    assert refreshed.summary["uniprot_query_at"]
+
+
+def test_source_protein_annotation_is_explicit_persisted_step(tmp_path: Path) -> None:
+    service = SignalPeptideScreeningService(
+        tmp_path,
+        library_service=FakeLibraryService(),
+        uspnet_adapter=FakeMissingUSPNetAdapter(),
+    )
+
+    result = service.screen_uniprot_candidates(max_records=2)
+
+    assert all(row["source_protein_route"] == "未评估" for row in result.rows)
+
+    annotation = service.annotate_persisted_source_proteins()
+    loaded = service.load_persisted_screening_result()
+
+    assert annotation["success"] is True
+    assert loaded is not None
+    assert loaded.summary["source_protein_annotation_status"] == "已评估"
+    assert loaded.rows[0]["source_protein_route"] == "分泌/胞外倾向"
+
+
 class FakeLibraryService:
     def discover_uniprot_candidate_library(self, **_kwargs):
         rows = [
@@ -126,6 +177,27 @@ class SimilarLibraryService:
         )
 
 
+class CountingLibraryService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def discover_uniprot_candidate_library(self, **_kwargs):
+        self.calls += 1
+        signal = "MKALLLALLALAAASAGA" if self.calls == 1 else "MKLLLLALLALAAASAGA"
+        rows = [
+            _library_row(f"OPN_UNIPROT_CALL_{self.calls}", f"CALL{self.calls}", signal, "Counting protein"),
+        ]
+        return UniProtCandidateLibraryResult(
+            rows=rows,
+            source_url=f"https://rest.uniprot.org/counting-fixture/{self.calls}",
+            errors=[],
+            initial_hit_count=1,
+            fetched_record_count=1,
+            extracted_signal_count=1,
+            deduplicated_count=1,
+        )
+
+
 class FakeUSPNetAdapter:
     def run(self, _fasta_file: Path, output_dir: Path, **_kwargs):
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -144,8 +216,8 @@ class FakeUSPNetAdapter:
                 ),
                 USPNetPrediction(
                     candidate_id="OPN_UNIPROT_LOW",
-                    predicted_type="NO_SP",
-                    predicted_cleavage="",
+                    predicted_type="LIPO",
+                    predicted_cleavage="MNNNNNNNNNN",
                     passed=False,
                     raw_sequence="MNNNNNNNNNNNNNNNNN",
                 ),
@@ -189,6 +261,30 @@ def _library_row(candidate_id: str, accession: str, signal: str, protein_name: s
         "source_type": "UniProt",
         "already_in_formal_library": False,
         "uniprot_reviewed": False,
+        "source_protein_location": "Secreted" if "Secreted" in protein_name else "",
+        "source_protein_location_ids": "SL-0243" if "Secreted" in protein_name else "",
+        "source_protein_location_evidence_codes": "ECO:0000269" if "Secreted" in protein_name else "",
+        "source_protein_keywords": "Signal",
+        "source_protein_keyword_ids": "KW-0732",
+        "source_protein_keyword_evidence_codes": "ECO:0000256",
+        "source_protein_go_terms": "extracellular region" if "Secreted" in protein_name else "",
+        "source_protein_go_ids": "GO:0005576" if "Secreted" in protein_name else "",
+        "source_protein_go_evidence": "IDA:UniProtKB" if "Secreted" in protein_name else "",
+        "source_protein_feature_types": "Signal",
+        "source_protein_feature_evidence_codes": "ECO:0000256",
+        "source_protein_uniprot_location_json": (
+            '[{"id":"SL-0243","value":"Secreted","evidence_codes":["ECO:0000269"]}]'
+            if "Secreted" in protein_name
+            else "[]"
+        ),
+        "source_protein_uniprot_keyword_json": '[{"id":"KW-0732","name":"Signal","evidence_codes":["ECO:0000256"]}]',
+        "source_protein_uniprot_go_json": (
+            '[{"go_id":"GO:0005576","term":"extracellular region","go_evidence":"IDA:UniProtKB"}]'
+            if "Secreted" in protein_name
+            else "[]"
+        ),
+        "source_protein_uniprot_feature_json": '[{"type":"Signal","evidence_codes":["ECO:0000256"]}]',
+        "source_protein_annotation_status": "未评估",
     }
 
 

@@ -1,19 +1,7 @@
 from __future__ import annotations
 
 from sigscout.adapters.uniprot import UniProtSignalPeptideSource, _next_link
-from sigscout.presets.opn import opn_library_service
 from sigscout.services.library import SignalPeptideLibraryService
-
-
-def test_opn_preset_library_contains_current_candidates() -> None:
-    service = opn_library_service()
-    rows = service.library_rows()
-    by_id = {row["candidate_id"]: row for row in rows}
-
-    assert len(rows) == 7
-    assert by_id["OPN_PPA_PASCHR3_0030"]["library_stage"] == "首轮推荐"
-    assert by_id["OPN_ALPHA_FULL_PROJECT"]["source_type"] == "项目基线"
-    assert service.candidate_prefix == "OPN_UNIPROT"
 
 
 def test_signal_peptide_library_validates_import_csv() -> None:
@@ -47,8 +35,30 @@ def test_uniprot_source_extracts_signal_features_and_duplicates() -> None:
     assert len(rows) == 1
     assert rows[0]["candidate_id"] == "OPN_UNIPROT_X12345"
     assert rows[0]["signal_peptide_sequence"] == "MKTLLALALALAAPAA"
+    assert "source_protein_route" not in rows[0]
+    assert rows[0]["source_protein_annotation_status"] == "未评估"
+    assert "Secreted" in rows[0]["source_protein_location"]
+    assert "SL-0243" in rows[0]["source_protein_location_ids"]
+    assert "GO:0005576 extracellular region" in rows[0]["source_protein_go_terms"]
+    assert "GO:0005576" in rows[0]["source_protein_go_ids"]
+    assert "ECO:0000269" in rows[0]["source_protein_location_evidence_codes"]
+    assert "source_protein_uniprot_location_json" in rows[0]
     assert len(duplicate_rows) == 1
     assert duplicate_rows[0]["duplicate_of"] == "OPN_UNIPROT_X12345"
+
+
+def test_uniprot_source_keeps_membrane_evidence_without_classifying() -> None:
+    source = UniProtSignalPeptideSource(candidate_prefix="PICHIA_UNIPROT")
+    item = _uniprot_item("M12345", "MEMBRANE_PICPA", "GPI-anchored cell wall protein")
+    item["features"].append({"type": "Transmembrane", "description": "Helical"})
+    item["keywords"] = [{"name": "Membrane"}]
+
+    rows, _errors, _extracted_count, _duplicate_rows = source.rows_from_items([item], exclude_existing=False)
+
+    assert "source_protein_route" not in rows[0]
+    assert rows[0]["source_protein_annotation_status"] == "未评估"
+    assert "Transmembrane" in rows[0]["source_protein_feature_types"]
+    assert "Membrane" in rows[0]["source_protein_keywords"]
 
 
 def test_uniprot_next_link_parser_handles_commas_inside_url() -> None:
@@ -75,6 +85,28 @@ def _uniprot_item(accession: str, uniprot_id: str, protein_name: str) -> dict:
             "recommendedName": {"fullName": {"value": protein_name}}
         },
         "sequence": {"value": "MKTLLALALALAAPAAQREST"},
+        "comments": [
+            {
+                "commentType": "SUBCELLULAR LOCATION",
+                "subcellularLocations": [
+                    {
+                        "location": {
+                            "value": "Secreted",
+                            "id": "SL-0243",
+                            "evidences": [{"evidenceCode": "ECO:0000269", "source": "PubMed", "id": "123"}],
+                        }
+                    },
+                ],
+            }
+        ],
+        "keywords": [{"name": "Signal"}],
+        "uniProtKBCrossReferences": [
+            {
+                "database": "GO",
+                "id": "GO:0005576",
+                "properties": [{"key": "GoTerm", "value": "C:extracellular region"}],
+            }
+        ],
         "features": [
             {
                 "type": "Signal",
@@ -82,4 +114,3 @@ def _uniprot_item(accession: str, uniprot_id: str, protein_name: str) -> dict:
             }
         ],
     }
-

@@ -1,0 +1,61 @@
+{
+  "version": "2026-06-18",
+  "notes": "Controlled identifier mapping for auxiliary source-protein route annotation. GO IDs are matched against GO ancestors when QuickGO ontology data is available; UniProt SL IDs and feature types are exact controlled values from UniProtKB.",
+  "routes": [
+    {
+      "route": "膜/锚定倾向",
+      "priority": 10,
+      "go_ancestor_ids": [
+        "GO:0016020",
+        "GO:0005886",
+        "GO:0005618"
+      ],
+      "uniprot_sl_ids": [
+        "SL-0039",
+        "SL-9902"
+      ],
+      "feature_types": [
+        "Transmembrane",
+        "Intramembrane",
+        "Topological domain"
+      ]
+    },
+    {
+      "route": "分泌/胞外倾向",
+      "priority": 20,
+      "go_ancestor_ids": [
+        "GO:0005576",
+        "GO:0005615"
+      ],
+      "uniprot_sl_ids": [
+        "SL-0243"
+      ],
+      "feature_types": []
+    },
+    {
+      "route": "分泌通路腔室倾向",
+      "priority": 30,
+      "go_ancestor_ids": [
+        "GO:0005783",
+        "GO:0005794",
+        "GO:0005773",
+        "GO:0005764",
+        "GO:0031982"
+      ],
+      "uniprot_sl_ids": [],
+      "feature_types": []
+    },
+    {
+      "route": "胞内或非典型",
+      "priority": 40,
+      "go_ancestor_ids": [
+        "GO:0005737",
+        "GO:0005634",
+        "GO:0005739",
+        "GO:0005777"
+      ],
+      "uniprot_sl_ids": [],
+      "feature_types": []
+    }
+  ]
+}

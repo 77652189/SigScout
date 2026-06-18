@@ -10,7 +10,7 @@ def test_parse_uspnet_results_maps_rows_to_fasta_ids(tmp_path: Path) -> None:
     results.write_text(
         "sequence,predicted_type,predicted_cleavage\n"
         "MKALLLALLALAAASAGA,SP,MKALLLALLALAAASAGA\n"
-        "MNNNNNNNNNNNNNNNNN,NO_SP,\n",
+        "MNNNNNNNNNNNNNNNNN,LIPO,MNNNNNNNNNN\n",
         encoding="utf-8",
     )
 
@@ -20,6 +20,8 @@ def test_parse_uspnet_results_maps_rows_to_fasta_ids(tmp_path: Path) -> None:
     assert predictions[0].predicted_type == "SP"
     assert predictions[0].passed is True
     assert predictions[1].candidate_id == "B"
+    assert predictions[1].predicted_type == "LIPO"
+    assert predictions[1].predicted_cleavage == "MNNNNNNNNNN"
     assert predictions[1].passed is False
 
 
@@ -29,4 +31,3 @@ def test_uspnet_missing_returns_chinese_message(tmp_path: Path) -> None:
 
     assert status.available is False
     assert "未检测到 USPNet" in status.message
-

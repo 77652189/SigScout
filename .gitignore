@@ -11,6 +11,8 @@ dist/
 build/
 *.egg-info/
 local_runs/
+external/USPNet/
+externals/USPNet/
 HANDOFF.md
 examples/opn/saved_screening/
 .streamlit/*

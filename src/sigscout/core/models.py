@@ -68,4 +68,4 @@ class UniProtCandidateLibraryResult:
     deduplicated_count: int
     duplicate_count: int = 0
     duplicate_rows: list[dict[str, object]] = field(default_factory=list)
-
+    query_at: str = ""
