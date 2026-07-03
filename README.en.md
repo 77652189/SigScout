@@ -69,6 +69,8 @@ Standard outputs:
 - `method_representative_candidates.fasta`
 - `signal_peptide_method_comparison_summary.json`
 
+The representatives page can also generate `AC` / `ABC` fusion-protein FASTA files and construct-index CSV files where A is the candidate signal peptide, B is a fixed helper sequence, and C is the target protein. It also adds `C_ONLY`, `BC`, and optional positive-control leader constructs. Construct tables include Kex2/Ste13, ER-retention motif, vacuole/membrane-risk, internal hydrophobic-run, signal-peptide quality, processing quality, external-localization support, design-risk, and overall-priority fields. DeepLoc 2.1 or BUSCA outputs should be generated manually on their web services and then imported back into SigScout as CSV/TSV files; SigScout does not automatically call those web services.
+
 Source-protein annotation adds fields such as `source_protein_route`, `source_protein_evidence_level`, `source_protein_route_basis`, structured UniProt evidence JSON, and optional QuickGO/GOA evidence. These annotations support review and prioritization; they do not automatically delete candidates.
 
 Real local run outputs are written to `local_runs/`, which is ignored by Git. Experiment handoff context in `HANDOFF.md`, saved example screening outputs in `examples/opn/saved_screening/`, Python caches, pytest caches, coverage reports, build artifacts, local Streamlit configuration, and knowledge-graph analysis caches are also ignored.

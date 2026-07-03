@@ -69,6 +69,8 @@ python -m sigscout.cli annotate-source --quickgo
 - `method_representative_candidates.fasta`
 - `signal_peptide_method_comparison_summary.json`
 
+代表序列页面还可以基于 A=候选信号肽、B=固定辅助序列、C=目标蛋白生成 `AC` / `ABC` 融合蛋白 FASTA 和构建索引 CSV，并加入 `C_ONLY`、`BC` 与可选阳性 leader 对照。构建表会补充 Kex2/Ste13、ER retention motif、液泡/膜定位风险、内部疏水段等辅助扫描，并输出信号肽质量、加工质量、外部定位支持、设计风险和综合优先级。DeepLoc 2.1 或 BUSCA 结果建议手动上传到对应网页服务后，再把 CSV/TSV 结果导入 SigScout 合并展示；SigScout 不自动调用这些网页服务。
+
 来源蛋白辅助评估会在 CSV 中补充 `source_protein_route`、`source_protein_evidence_level`、`source_protein_route_basis`、UniProt 结构化证据 JSON 和可选 QuickGO/GOA 证据。辅助结论只用于排序和人工审查，不作为自动删除候选的条件。
 
 本地真实运行结果默认写入 `local_runs/`，该目录已被 `.gitignore` 忽略。实验交接上下文 `HANDOFF.md`、示例筛选输出 `examples/opn/saved_screening/`、Python 缓存、pytest 缓存、coverage、打包产物、Streamlit 本地配置和知识图谱分析缓存也不会进入 Git。
