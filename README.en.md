@@ -1,31 +1,94 @@
+<div align="center">
+
 # SigScout
 
-[中文说明](README.md)
+**Signal peptide screening and fusion-construct preparation workbench for Pichia secretion design**
 
-SigScout is a signal peptide workbench for secretion construct design. It helps discover, interpret, screen, cluster, and export candidate signal peptides. The current default workflow focuses on Pichia/Komagataella-derived signal peptide candidates for heterologous secretion-expression discussion.
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-local%20workbench-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![pandas](https://img.shields.io/badge/pandas-tabular%20workflow-150458?logo=pandas&logoColor=white)](https://pandas.pydata.org/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-data%20models-E92063)](https://docs.pydantic.dev/)
 
-SigScout is not meant to replace wet-lab validation. Its job is to turn early signal peptide candidates into an auditable and reproducible experimental draft: preserve source evidence, expose transparent rule checks, collapse highly similar sequences into representatives, and export CSV/FASTA files for downstream design.
+**Language:** [Chinese](README.md) | English
 
-## Features
+</div>
 
-- Query UniProt for proteins annotated with `signal peptide` features.
-- Apply transparent rule checks for the N-region charge, H-region hydrophobic core, and C-region cleavage-site preference.
-- Optionally call USPNet-fast for machine-learning review; missing USPNet installations do not block rule-based screening.
-- Run source-protein localization annotation as a separate step; refreshing candidates does not automatically classify them as secreted, membrane-associated, or unknown.
-- Base source-protein annotation on UniProt controlled subcellular-location terms, GO cellular component IDs, feature evidence codes, and optional QuickGO/GOA evidence rather than free-text keyword matching.
-- Cluster highly similar signal peptides while preserving complete candidate and duplicate evidence.
-- Export CSV, FASTA, and JSON summary files for wet-lab discussion or downstream codon-optimization workflows.
-- Load locally saved screening results when available; experiment context and saved example outputs are ignored by Git by default.
+---
 
-## Scope
+## Overview
 
-SigScout does not run pcSec model comparisons, does not depend on MATLAB, does not perform codon optimization, and does not integrate SignalP 6.0. Tools such as PichiaCLM can consume SigScout representative exports later for DNA/CDS-level design, but SigScout itself stays at the protein-level signal peptide screening layer.
+SigScout is a protein-level signal peptide workbench for hLF / OPN secretion-expression design. It helps discover, interpret, screen, cluster, and export candidate signal peptides before wet-lab validation.
 
-SigScout outputs draft experimental candidates, not final synthesis-ready sequences. Real secretion performance must be validated with the actual host strain, vector, cultivation condition, and wet-lab assay.
+SigScout does not predict real secretion efficiency. Its role is to narrow the candidate space, preserve reviewable evidence, and prepare structured inputs for downstream codon optimization, fusion-construct design, and localization-risk review.
 
-## Installation
+## What It Does
 
-Python 3.10 or newer is recommended.
+| Module | Current capability |
+|---|---|
+| Candidate discovery | Query UniProt for proteins with `signal peptide` features and import local CSV candidates |
+| Rule scoring | Check N-region positive charge, H-region hydrophobic core, C-region cleavage preference, and low-complexity risks |
+| USPNet review | Optionally call local USPNet-fast; missing USPNet does not block rule-based screening |
+| Source-protein evidence | Use structured UniProt localization, GO cellular component terms, feature evidence codes, and optional QuickGO/GOA evidence |
+| Similarity clustering | Group highly similar signal peptides, export representatives, and preserve full duplicate/source evidence |
+| Fusion constructs | Generate AC / ABC fusion proteins, construct indexes, positive leader controls, and processing-risk fields |
+| Localization import | Merge DeepLoc 2.1 or BUSCA CSV/TSV outputs back into construct priority tables |
+| Exports | Write CSV, FASTA, and JSON summaries for wet-lab discussion or downstream tools |
+
+## Workflow
+
+```mermaid
+flowchart LR
+    A["UniProt / local CSV"] --> B["Candidate library"]
+    B --> C["Rule scoring"]
+    B --> D["Optional USPNet"]
+    B --> E["Source protein evidence"]
+    C --> F["Similarity clustering"]
+    D --> F
+    E --> F
+    F --> G["Representative signal peptides"]
+    G --> H["AC / ABC fusion constructs"]
+    H --> I["DeepLoc / BUSCA import"]
+    I --> J["Priority table for wet-lab review"]
+```
+
+Typical downstream use:
+
+1. Select representative signal peptides with SigScout.
+2. Generate hLF / OPN target fusion constructs.
+3. Review localization risks with external tools.
+4. Export selected amino-acid sequences to CDS-level tools such as PichiaCLM.
+5. Feed wet-lab results back into candidate prioritization.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    UI["Streamlit UI<br/>src/sigscout/ui"]
+    CLI["CLI<br/>src/sigscout/cli.py"]
+    SERVICES["Services<br/>library / screening / rules / fusion / exports"]
+    CORE["Core models<br/>candidate and target inputs"]
+    ADAPTERS["Adapters<br/>UniProt / QuickGO / USPNet / process runner"]
+    DATA["Local outputs<br/>local_runs / CSV / FASTA / JSON"]
+
+    UI --> SERVICES
+    CLI --> SERVICES
+    SERVICES --> CORE
+    SERVICES --> ADAPTERS
+    SERVICES --> DATA
+```
+
+| Layer | Key path | Responsibility |
+|---|---|---|
+| UI | [`src/sigscout/ui/streamlit_app.py`](src/sigscout/ui/streamlit_app.py) | Local workbench for screening, source annotation, representative browsing, fusion generation, and localization import |
+| CLI | [`src/sigscout/cli.py`](src/sigscout/cli.py) | Scriptable discovery, screening, annotation, and app launch |
+| Core | [`src/sigscout/core/`](src/sigscout/core/) | Candidate records, target inputs, sequence cleaning, and path discovery |
+| Services | [`src/sigscout/services/`](src/sigscout/services/) | Candidate library, rule scoring, USPNet merge, clustering, source-route annotation, fusion constructs, and exports |
+| Adapters | [`src/sigscout/adapters/`](src/sigscout/adapters/) | UniProt, QuickGO/GOA, USPNet, and local process integration |
+| Tests | [`tests/`](tests/) | Focused checks for rules, library import, screening, source annotation, USPNet, and fusion constructs |
+
+## Quick Start
+
+Install in editable mode:
 
 ```powershell
 cd C:\Users\63097\Documents\CursorProject\SigScout
@@ -35,15 +98,13 @@ python -m pip install -U pip
 python -m pip install -e ".[test]"
 ```
 
-## Run
-
-The recommended local port is `8506`:
+Start the Streamlit workbench:
 
 ```powershell
 python -m streamlit run src/sigscout/ui/streamlit_app.py --server.address 0.0.0.0 --server.port 8506
 ```
 
-CLI commands are also available:
+Or use the CLI:
 
 ```powershell
 python -m sigscout.cli serve --port 8506
@@ -52,40 +113,40 @@ python -m sigscout.cli screen --taxon-id 4922 --max-records 300
 python -m sigscout.cli annotate-source --quickgo
 ```
 
-## Inputs And Outputs
+## Outputs
 
-Primary inputs:
+Standard screening outputs:
 
-- Candidate signal peptide sources, such as UniProt, literature, manual imports, or internal experiment records.
-- UniProt query settings such as taxon ID, maximum record count, and reviewed-only filtering.
+| File | Purpose |
+|---|---|
+| `uniprot_candidates.csv` | Raw UniProt-derived candidates |
+| `uniprot_duplicate_candidates.csv` | Duplicate or near-duplicate source evidence |
+| `signal_peptide_method_comparison.csv` | Rule/USPNet/source-evidence merged candidate table |
+| `signal_peptide_representatives.csv` | Representative sequence groups |
+| `method_recommended_candidates.fasta` | Recommended candidates in FASTA format |
+| `method_representative_candidates.fasta` | Representative candidates in FASTA format |
+| `signal_peptide_method_comparison_summary.json` | Run summary |
 
-Standard outputs:
+Fusion outputs include AC / ABC construct FASTA, construct-index CSV, optional control leader rows, processing notes, localization import fields, risk flags, and priority scores.
 
-- `uniprot_candidates.csv`
-- `uniprot_duplicate_candidates.csv`
-- `signal_peptide_method_comparison.csv`
-- `signal_peptide_representatives.csv`
-- `method_recommended_candidates.fasta`
-- `method_representative_candidates.fasta`
-- `signal_peptide_method_comparison_summary.json`
+## Boundaries
 
-The representatives page can also generate `AC` / `ABC` fusion-protein FASTA files and construct-index CSV files where A is the candidate signal peptide, B is a fixed helper sequence, and C is the target protein. It also adds `C_ONLY`, `BC`, and optional positive-control leader constructs. Construct tables include Kex2/Ste13, ER-retention motif, vacuole/membrane-risk, internal hydrophobic-run, signal-peptide quality, processing quality, external-localization support, design-risk, and overall-priority fields. DeepLoc 2.1 or BUSCA outputs should be generated manually on their web services and then imported back into SigScout as CSV/TSV files; SigScout does not automatically call those web services.
+- SigScout does not run pcSec model comparison.
+- SigScout does not perform codon optimization.
+- SigScout does not integrate or download SignalP 6.0.
+- USPNet-fast is optional and must be installed locally by the user if needed.
+- DeepLoc and BUSCA are not called automatically; export their web-service results manually and import CSV/TSV files back into SigScout.
+- The output is an experiment-discussion candidate set, not a final synthesis-ready guarantee.
+- Real secretion performance must be validated with the actual strain, vector, cultivation condition, and assay.
 
-Source-protein annotation adds fields such as `source_protein_route`, `source_protein_evidence_level`, `source_protein_route_basis`, structured UniProt evidence JSON, and optional QuickGO/GOA evidence. These annotations support review and prioritization; they do not automatically delete candidates.
+## Data And Compliance Notes
 
-Real local run outputs are written to `local_runs/`, which is ignored by Git. Experiment handoff context in `HANDOFF.md`, saved example screening outputs in `examples/opn/saved_screening/`, Python caches, pytest caches, coverage reports, build artifacts, local Streamlit configuration, and knowledge-graph analysis caches are also ignored.
+- Keep UniProt accessions, query conditions, database provenance, and query dates in external materials.
+- Preserve QuickGO/GOA GO IDs, evidence codes, references, and query dates when using source-protein evidence.
+- Place optional USPNet-fast under `external/USPNet/` or configure `USPNET_REPO` / `USPNET_MODEL_DIR`.
+- Runtime outputs are written to `local_runs/` and ignored by Git.
 
-## Project Layout
-
-```text
-src/sigscout/core/          Domain models, path discovery, input interfaces
-src/sigscout/adapters/      UniProt, USPNet, and process adapters
-src/sigscout/services/      Candidate library, rule screening, clustering, exports, and input implementations
-src/sigscout/ui/            Streamlit workbench
-tests/                      Unit tests
-```
-
-## Development Checks
+## Tests
 
 ```powershell
 python -m compileall src tests sigscout
@@ -93,33 +154,21 @@ python -m pytest -q
 python -m sigscout.cli --help
 ```
 
-Streamlit health check:
+Health check after launching Streamlit:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:8506/_stcore/health
 ```
 
-## Compliance Notes
-
-- UniProt is used as a public database source; external materials should preserve accessions, database provenance, query conditions, and query dates.
-- QuickGO/GOA evidence comes from EMBL-EBI services; review outputs should preserve GO IDs, evidence codes, references, and query dates.
-- USPNet-fast is an optional external review tool; use its code and model files according to the official repository license and model-download instructions.
-- If USPNet-fast is enabled locally, place it under `external/USPNet/`; this directory is ignored by Git. You may also set `USPNET_REPO` / `USPNET_MODEL_DIR` to another local path.
-- SignalP 6.0 has licensing and use restrictions. This project does not download it, integrate it, or use it as a default route.
-- This tool does not guarantee expression level, secretion efficiency, or final construct performance.
-
 ## Acknowledgements
 
-SigScout uses and thanks the following open-source projects and data sources:
+SigScout uses and thanks:
 
 - [UniProt](https://www.uniprot.org/) for protein sequences, signal peptide annotations, and accession provenance.
-- [QuickGO / GOA](https://www.ebi.ac.uk/QuickGO/) for GO cellular component annotations, evidence codes, and references.
-- [USPNet](https://github.com/ml4bio/USPNet) as an optional machine-learning signal peptide review tool.
-- [Streamlit](https://streamlit.io/) for the interactive local workbench.
-- [pandas](https://pandas.pydata.org/) for CSV and tabular data handling.
-- [Pydantic](https://docs.pydantic.dev/) for candidate data modeling.
-- [pytest](https://pytest.org/) for project tests.
+- [QuickGO / GOA](https://www.ebi.ac.uk/QuickGO/) for GO cellular component annotations and evidence codes.
+- [USPNet](https://github.com/ml4bio/USPNet) as an optional signal peptide review tool.
+- [Streamlit](https://streamlit.io/), [pandas](https://pandas.pydata.org/), [Pydantic](https://docs.pydantic.dev/), and [pytest](https://pytest.org/).
 
 ## License
 
-This repository does not yet declare an open-source license. Add an explicit license and review third-party data/model terms before external reuse, publication, or commercial distribution.
+This repository does not currently declare an open-source license. Add an explicit license and review third-party data/model terms before external reuse, publication, or commercial distribution.
