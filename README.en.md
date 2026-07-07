@@ -17,7 +17,7 @@
 
 ## Overview
 
-SigScout is a protein-level signal peptide workbench for hLF / OPN secretion-expression design. It helps discover, interpret, screen, cluster, and export candidate signal peptides before wet-lab validation.
+SigScout is a protein-level signal peptide workbench for secretion-expression target proteins. It helps discover, interpret, screen, cluster, and export candidate signal peptides before wet-lab validation.
 
 SigScout does not predict real secretion efficiency. Its role is to narrow the candidate space, preserve reviewable evidence, and prepare structured inputs for downstream codon optimization, fusion-construct design, and localization-risk review.
 
@@ -54,7 +54,7 @@ flowchart LR
 Typical downstream use:
 
 1. Select representative signal peptides with SigScout.
-2. Generate hLF / OPN target fusion constructs.
+2. Generate target-protein fusion constructs.
 3. Review localization risks with external tools.
 4. Export selected amino-acid sequences to CDS-level tools such as PichiaCLM.
 5. Feed wet-lab results back into candidate prioritization.
