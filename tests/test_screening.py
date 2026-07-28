@@ -142,6 +142,23 @@ def test_source_protein_annotation_is_explicit_persisted_step(tmp_path: Path) ->
     assert loaded.rows[0]["source_protein_route"] == "分泌/胞外倾向"
 
 
+def test_refresh_preserves_completed_source_protein_annotations(tmp_path: Path) -> None:
+    service = SignalPeptideScreeningService(
+        tmp_path,
+        library_service=FakeLibraryService(),
+        uspnet_adapter=FakeMissingUSPNetAdapter(),
+    )
+    service.screen_uniprot_candidates(max_records=2)
+    annotation = service.annotate_persisted_source_proteins()
+    assert annotation["success"] is True
+
+    refreshed = service.screen_uniprot_candidates(max_records=2, refresh_uniprot=True)
+
+    by_accession = {row["accession"]: row for row in refreshed.rows}
+    assert by_accession["X12345"]["source_protein_annotation_status"] == "已评估"
+    assert by_accession["X12345"]["source_protein_route"] == "分泌/胞外倾向"
+
+
 class FakeLibraryService:
     def discover_uniprot_candidate_library(self, **_kwargs):
         rows = [

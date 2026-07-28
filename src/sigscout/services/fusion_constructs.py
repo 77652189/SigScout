@@ -14,6 +14,10 @@ DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE = "APVNTTTEDETAQIPAEAVIGYSDLEGDFDVAVLPFSNSTNNG
 DEFAULT_OPN_TARGET_SEQUENCE = (
     "IPVKQADSGSSEEKQLYNKYPDAVATWLNPDPSQKQNLLAPQNAVSSEETNDFKQETLPSKSNESHDHMDDMDDEDDDDHVDSQDSIDSNDSDDVDDTDDSHQSDESHHSDESDELVTDFPTDLPATEVFTPVVPTVDTYDGRGDSVVYGLRSKSKKFRRPDIQYPDATDEDITSHMESEELNGAYKAIPVAQDLNAPSDWDSRGKDSYETSQLDDQSAETHSHKQSRLYKRKANDESNEHSDVIDSQELSKVSREFHSHEFHSHEDMLVVDPKSKEEDKHLKFRISHELDSASSEVN"
 )
+DEFAULT_HLF_REFERENCE_SEQUENCE = (
+    "MKLVFLVLLFLGALGLCLAGRRRSVQWCAVSQPEATKCFQWQRNMRKVRGPPVSCIKRDSPIQCIQAIAENRADAVTLDGGFIYEAGLAPYKLRPVAAEVYGTERQPRTHYYAVAVVKKGGSFQLNELQGLKSCHTGLRRTAGWNVPIGTLRPFLNWTGPPEPIEAAVARFFSASCVPGADKGQFPNLCRLCAGTGENKCAFSSQEPYFSYSGAFKCLRDGAGDVAFIRESTVFEDLSDEAERDEYELLCPDNTRKPVDKFKDCHLARVPSHAVVARSVNGKEDAIWNLLRQAQEKFGKDKSPKFQLFGSPSGQKDLLFKDSAIGFSRVPPRIDSGLYLGSGYFTAIQNLRKSEEEVAARRARVVWCAVGEQELRKCNQWSGLSEGSVTCSSASTTEDCIALVLKGEADAMSLDGGYVYTAGKCGLVPVLAENYKSQQSSDPDPNCVDRPVEGYLAVAVVRRSDTSLTWNSVKGKKSCHTAVDRTAGWNIPMGLLFNQTGSCKFDEYFSQSCAPGSDPRSNLCALCIGDEQGENKCVPNSNERYYGYTGAFRCLAENAGDVAFVKDVTVLQNTDGNNNEAWAKDLKLADFALLCLDGKRKPVTEARSCHLAMAPNHAVVSRMDKVERLKQVLLHQQAKFGRNGSDCPDKFCLFQSETKNLLFNDNTECLARLHGKTTYEKYLGPQYVAGITNLKKCSTSPLLEACEFLRK"
+)
+DEFAULT_HLF_TARGET_SEQUENCE = DEFAULT_HLF_REFERENCE_SEQUENCE[19:]
 LOCALIZATION_ID_COLUMNS = (
     "construct_id",
     "id",
@@ -72,11 +76,40 @@ class LocalizationImportResult:
     imported_count: int
 
 
+@dataclass(frozen=True)
+class FusionTargetPreset:
+    key: str
+    label: str
+    sequence: str
+    source: str
+    note: str
+
+
+FUSION_TARGET_PRESETS = {
+    "opn": FusionTargetPreset(
+        key="opn",
+        label="OPN / 骨桥蛋白",
+        sequence=DEFAULT_OPN_TARGET_SEQUENCE,
+        source="用户提供的 OPN 固定 C 序列",
+        note="当前默认目标蛋白；用于骨桥蛋白分泌构建评估。",
+    ),
+    "hlf": FusionTargetPreset(
+        key="hlf",
+        label="hLF / 人乳铁蛋白",
+        sequence=DEFAULT_HLF_TARGET_SEQUENCE,
+        source="UniProtKB reviewed P02788; reference also aligned with Evaluation of the potential food allergy risks of human lactoferrin expressed in Komagataella phaffii (2024)",
+        note="默认 C 使用 P02788 去除 native signal peptide 1-19 后的成熟人乳铁蛋白区域，避免与候选毕赤酵母信号肽 A 形成双信号肽。",
+    ),
+}
+
+
 def build_fusion_constructs(
     signal_rows: Iterable[dict[str, object]],
     *,
     b_sequence: str,
     c_sequence: str,
+    target_key: str = "custom",
+    target_label: str = "Custom target",
     include_ac: bool = True,
     include_abc: bool = True,
     include_controls: bool = True,
@@ -102,11 +135,11 @@ def build_fusion_constructs(
 
     rows: list[dict[str, object]] = []
     if include_controls:
-        rows.append(_construct_row({}, "CONTROL", "C_ONLY", "", "", c_clean))
+        rows.append(_construct_row({}, "CONTROL", "C_ONLY", "", "", c_clean, target_key, target_label))
         if b_clean:
-            rows.append(_construct_row({}, "CONTROL", "BC", "", b_clean, c_clean))
+            rows.append(_construct_row({}, "CONTROL", "BC", "", b_clean, c_clean, target_key, target_label))
         if positive_clean:
-            rows.append(_construct_row({}, "CONTROL", "POSITIVE_CONTROL_C", positive_clean, "", c_clean))
+            rows.append(_construct_row({}, "CONTROL", "POSITIVE_CONTROL_C", positive_clean, "", c_clean, target_key, target_label))
 
     for source in signal_rows:
         candidate_id = str(source.get("candidate_id", "")).strip()
@@ -118,9 +151,9 @@ def build_fusion_constructs(
         if not candidate_id:
             candidate_id = f"candidate_{len(rows) + 1}"
         if include_ac:
-            rows.append(_construct_row(source, candidate_id, "AC", a_clean, "", c_clean))
+            rows.append(_construct_row(source, candidate_id, "AC", a_clean, "", c_clean, target_key, target_label))
         if include_abc:
-            rows.append(_construct_row(source, candidate_id, "ABC", a_clean, b_clean, c_clean))
+            rows.append(_construct_row(source, candidate_id, "ABC", a_clean, b_clean, c_clean, target_key, target_label))
 
     if not rows and not errors:
         errors.append("没有可用于生成融合构建的代表信号肽。")
@@ -143,10 +176,11 @@ def fusion_constructs_to_fasta(rows: Iterable[dict[str, object]]) -> str:
         construct_id = str(row.get("construct_id", "")).strip()
         source_id = str(row.get("candidate_id", "")).strip()
         construct_type = str(row.get("construct_type", "")).strip()
+        target_key = str(row.get("target_key", "")).strip()
         sequence = str(row.get("construct_sequence", "")).strip()
         if not construct_id or not sequence:
             continue
-        header = f"{construct_id}|source={source_id}|type={construct_type}|len={len(sequence)}"
+        header = f"{construct_id}|source={source_id}|type={construct_type}|target={target_key}|len={len(sequence)}"
         lines.append(f">{header}")
         lines.extend(sequence[index : index + 80] for index in range(0, len(sequence), 80))
     return "\n".join(lines) + ("\n" if lines else "")
@@ -301,12 +335,16 @@ def _construct_row(
     a_sequence: str,
     b_sequence: str,
     c_sequence: str,
+    target_key: str,
+    target_label: str,
 ) -> dict[str, object]:
     sequence = a_sequence + b_sequence + c_sequence
     row = {
         "construct_id": f"{candidate_id}_{construct_type}",
         "candidate_id": candidate_id,
         "construct_type": construct_type,
+        "target_key": target_key,
+        "target_label": target_label,
         "accession": source.get("accession", ""),
         "protein_name": source.get("protein_name", ""),
         "source_protein_route": source.get("source_protein_route", ""),

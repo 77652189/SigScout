@@ -17,7 +17,7 @@ from sigscout.adapters.uspnet import USPNetAdapter  # noqa: E402
 from sigscout.core.paths import ProjectPaths  # noqa: E402
 from sigscout.services.fusion_constructs import (  # noqa: E402
     DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE,
-    DEFAULT_OPN_TARGET_SEQUENCE,
+    FUSION_TARGET_PRESETS,
     build_fusion_constructs,
     fusion_constructs_to_csv,
     fusion_constructs_to_fasta,
@@ -25,7 +25,20 @@ from sigscout.services.fusion_constructs import (  # noqa: E402
     score_construct,
     summarize_localization,
 )
+from sigscout.services.experimental_evidence import (  # noqa: E402
+    annotate_candidate_experimental_evidence,
+    annotate_construct_experimental_evidence,
+    build_target_experimental_candidates,
+)
+from sigscout.services.experimental_feedback import (  # noqa: E402
+    experimental_feedback_template,
+    load_experimental_feedback,
+    parse_experimental_feedback_csv,
+    save_experimental_feedback,
+    summarize_experimental_feedback,
+)
 from sigscout.services.library import SignalPeptideLibraryService  # noqa: E402
+from sigscout.ui.experimental_browser import render_opn_experimental_browser  # noqa: E402
 from sigscout.services.screening import SignalPeptideScreeningResult, SignalPeptideScreeningService  # noqa: E402
 
 
@@ -48,7 +61,7 @@ def main() -> None:
     st.caption("蛋白层面的信号肽候选发现、来源证据解释、代表序列整理和融合蛋白定位评估。")
     category = st.sidebar.radio(
         "功能导航",
-        ["毕赤酵母信号肽筛选", "代表序列与下载", "融合定位"],
+        ["毕赤酵母信号肽筛选", "代表序列与下载", "融合定位", "实验反馈"],
     )
     if category == "毕赤酵母信号肽筛选":
         subpage = st.sidebar.radio(
@@ -60,11 +73,13 @@ def main() -> None:
             "子功能",
             ["候选浏览", "证据分布", "相似序列", "原始数据"],
         )
-    else:
+    elif category == "融合定位":
         subpage = st.sidebar.radio(
             "子功能",
             ["生成定位评估文件", "导入 DeepLoc 结果"],
         )
+    else:
+        subpage = st.sidebar.radio("子功能", ["OPN 实验结果", "导入与模板"])
     st.sidebar.divider()
     st.sidebar.caption("候选来源：UniProt 中带 signal peptide 注释的毕赤酵母/Komagataella 蛋白。")
     st.sidebar.caption("SigScout 不做目标蛋白适配性预测，也不做密码子优化。")
@@ -73,8 +88,10 @@ def main() -> None:
         render_screening(subpage)
     elif category == "代表序列与下载":
         render_representatives(subpage)
-    else:
+    elif category == "融合定位":
         render_fusion_localization(subpage)
+    else:
+        render_experimental_feedback(subpage)
 
 
 def render_screening(subpage: str = "刷新并筛选毕赤酵母信号肽") -> None:
@@ -156,14 +173,163 @@ def render_representatives(subpage: str = "候选浏览") -> None:
 
 def render_fusion_localization(subpage: str = "生成定位评估文件") -> None:
     st.subheader("融合定位")
-    loaded = _load_representative_frames()
-    if loaded is None:
-        return
-    _, _, representatives = loaded
     if subpage == "生成定位评估文件":
+        loaded = _load_representative_frames()
+        if loaded is None:
+            return
+        _, _, representatives = loaded
         _render_fusion_generation_panel(representatives)
     else:
         _render_localization_import_panel()
+
+def render_experimental_feedback(subpage: str = "OPN 实验结果") -> None:
+    st.subheader("实验反馈")
+    st.info("当前实验反馈仅来自 OPN（骨桥蛋白）实验，不会自动外推到 hLF，也不会改写通用信号肽候选分数。")
+    path = PATHS.local_runs_dir / "experimental_feedback" / "opn_measurements.csv"
+    if subpage == "导入与模板":
+        _render_experimental_feedback_import(path)
+        return
+    result = load_experimental_feedback(path, target_key="opn")
+    if result.errors:
+        for error in result.errors:
+            st.error(error)
+        return
+    if result.rows.empty:
+        st.warning("尚未导入 OPN 实验反馈。请进入“导入与模板”上传标准 CSV。")
+        return
+    _render_experimental_feedback_results(result.rows, result.warnings)
+
+
+def _render_experimental_feedback_results(rows: pd.DataFrame, warnings: tuple[str, ...]) -> None:
+    summary = summarize_experimental_feedback(rows)
+    cols = st.columns(5)
+    cols[0].metric("报告记录", int(summary["records"]))
+    cols[1].metric("有效测量", int(summary["measurements"]))
+    cols[2].metric("结果缺失", int(summary["missing_results"]))
+    cols[3].metric("实验轮次", int(summary["batches"]))
+    cols[4].metric("信号肽名称", int(summary["signal_peptides"]))
+    for warning in warnings:
+        st.warning(warning)
+
+    batch_options = rows["batch_id"].drop_duplicates().tolist()
+    selected_batch = st.selectbox("实验轮次", batch_options, key="experimental_feedback_batch")
+    batch = rows.loc[rows["batch_id"] == selected_batch].copy()
+    batch = batch.sort_values(["measurement_status", "batch_rank"], na_position="last")
+    context = batch.iloc[0]
+    st.caption(
+        f"目标：{context['target_variant']} · 宿主：{context['strain_background']} · "
+        f"整合位点：{context['integration_locus']}。排名仅在本轮条件内有效。"
+    )
+
+    measured = batch.loc[batch["measurement_status"] == "measured"].copy()
+    if not measured.empty:
+        chart = measured.set_index("source_construct_name")[["yield_ug_l"]].rename(
+            columns={"yield_ug_l": "产量（μg/L）"}
+        )
+        st.bar_chart(chart, horizontal=True)
+
+    display = batch[[
+        "batch_rank",
+        "source_construct_name",
+        "measurement_status",
+        "yield_ug_l",
+        "batch_relative_to_best",
+        "is_reference_baseline",
+        "batch_fold_vs_reference",
+        "reference_basis",
+    ]].copy()
+    display["measurement_status"] = display["measurement_status"].map({
+        "measured": "已测得",
+        "result_missing": "报告未给产量",
+    })
+    display = display.rename(columns={
+        "batch_rank": "批内排名",
+        "source_construct_name": "报告原始构建名",
+        "measurement_status": "结果状态",
+        "yield_ug_l": "产量（μg/L）",
+        "batch_relative_to_best": "相对本轮最佳",
+        "is_reference_baseline": "推定参考基线",
+        "batch_fold_vs_reference": "相对参考基线倍数",
+        "reference_basis": "参考依据",
+    })
+    st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "相对本轮最佳": st.column_config.ProgressColumn(
+                min_value=0.0, max_value=1.0, format="percent"
+            ),
+            "相对参考基线倍数": st.column_config.NumberColumn(format="%.2f×"),
+            "产量（μg/L）": st.column_config.NumberColumn(format="%.0f"),
+            "推定参考基线": st.column_config.CheckboxColumn(),
+        },
+    )
+    st.caption("“推定参考基线”用于轮内倍率验算，并非实验报告明确标注的正式对照。")
+    _render_experimental_sequence_details(batch)
+    with st.expander("查看完整结构化原始数据"):
+        st.dataframe(batch, hide_index=True, use_container_width=True)
+
+
+def _render_experimental_sequence_details(batch: pd.DataFrame) -> None:
+    with st.expander("查看报告原始名称与完整序列", expanded=False):
+        choices = batch["experiment_id"].tolist()
+        labels = batch.set_index("experiment_id")["source_construct_name"].to_dict()
+        selected_id = st.selectbox(
+            "构建记录",
+            choices,
+            format_func=lambda value: labels.get(value, value),
+            key=f"experimental_sequence_{batch['batch_id'].iloc[0]}",
+        )
+        row = batch.loc[batch["experiment_id"] == selected_id].iloc[0]
+        st.text_input("报告原始构建名", value=str(row["source_construct_name"]), disabled=True)
+        st.text_input("内部规范化 ID", value=str(row["construct_name"]), disabled=True)
+        st.text_area(
+            "信号肽氨基酸序列",
+            value=str(row["signal_peptide_sequence"]),
+            height=100,
+            key=f"experimental_sp_aa_{selected_id}",
+        )
+        st.text_area(
+            "信号肽核苷酸序列",
+            value=str(row["signal_peptide_nucleotide_sequence"]),
+            height=120,
+            key=f"experimental_sp_nt_{selected_id}",
+        )
+        st.text_area(
+            "OPN 氨基酸序列",
+            value=str(row["target_protein_sequence"]),
+            height=150,
+            key=f"experimental_target_aa_{selected_id}",
+        )
+        st.text_area(
+            f"{row['target_variant']} 核苷酸序列",
+            value=str(row["target_nucleotide_sequence"]),
+            height=180,
+            key=f"experimental_target_nt_{selected_id}",
+        )
+
+def _render_experimental_feedback_import(path: Path) -> None:
+    st.markdown("**导入 OPN 实验反馈**")
+    st.caption(f"数据保存在本地忽略目录：{path}。上传会替换当前 OPN 实验反馈文件，不会修改候选库。")
+    st.download_button(
+        "下载实验反馈 CSV 模板",
+        experimental_feedback_template().encode("utf-8-sig"),
+        file_name="experimental_feedback_template.csv",
+        mime="text/csv",
+    )
+    uploaded = st.file_uploader("上传填写后的 CSV", type=["csv"], key="experimental_feedback_upload")
+    if uploaded is None:
+        return
+    result = parse_experimental_feedback_csv(uploaded.getvalue(), target_key="opn")
+    if result.errors:
+        for error in result.errors:
+            st.error(error)
+        return
+    st.dataframe(result.rows, hide_index=True, use_container_width=True)
+    if st.button("保存为当前 OPN 实验反馈", type="primary", key="save_experimental_feedback"):
+        save_experimental_feedback(result.rows, path)
+        st.success(f"已保存 {len(result.rows)} 条 OPN 实验记录（含结果缺失记录）。")
 
 
 def render_help() -> None:
@@ -294,6 +460,13 @@ def _render_representative_workbench(rows: pd.DataFrame, representatives: pd.Dat
 
 
 def _render_candidate_browser(representatives: pd.DataFrame) -> None:
+    mode = st.segmented_control(
+        "浏览模式", ["通用候选", "OPN 实验视图"],
+        default="通用候选", key="candidate_browser_mode",
+    )
+    if mode == "OPN 实验视图":
+        render_opn_experimental_browser(representatives, PATHS.local_runs_dir)
+        return
     filtered = _render_candidate_filters(representatives)
     if filtered.empty:
         st.info("没有符合当前筛选条件的代表序列。")
@@ -730,9 +903,74 @@ def _render_similar_sequence_details(rows: pd.DataFrame, representatives: pd.Dat
             )
 
 
+def _select_fusion_target() -> tuple[str, object]:
+    options = list(FUSION_TARGET_PRESETS.keys())
+    current = str(st.session_state.get("fusion_target_key", "opn"))
+    index = options.index(current) if current in options else 0
+    selected = st.selectbox(
+        "C 目标蛋白",
+        options,
+        index=index,
+        format_func=lambda key: FUSION_TARGET_PRESETS[key].label,
+        key="fusion_target_key",
+        help="切换目标后会自动替换 C 固定序列，并清空当前会话中的旧 AC/ABC 构建，避免跨目标混用。",
+    )
+    preset = FUSION_TARGET_PRESETS[selected]
+    applied = st.session_state.get("fusion_target_applied_key")
+    if applied != selected:
+        st.session_state["fusion_c_sequence"] = preset.sequence
+        st.session_state["fusion_target_applied_key"] = selected
+        if applied is not None:
+            _clear_fusion_session_rows()
+    st.caption(f"{preset.note} 来源：{preset.source}；C 长度 {len(preset.sequence)} aa。")
+    return selected, preset
+
+
+def _clear_fusion_session_rows() -> None:
+    for key in list(st.session_state.keys()):
+        if key in {"fusion_construct_rows", "fusion_construct_errors", "fusion_localization_rows"} or key.startswith("fusion_localization_rows_"):
+            st.session_state.pop(key, None)
+
+def _opn_feedback_rows() -> pd.DataFrame:
+    result = load_experimental_feedback(
+        PATHS.local_runs_dir / "experimental_feedback" / "opn_measurements.csv",
+        target_key="opn",
+    )
+    return result.rows if result.valid else pd.DataFrame()
+
+
 def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
     st.markdown("**AC / ABC 融合蛋白定位评估文件**")
     st.caption("SigScout 只生成 FASTA 和导入外部结果；DeepLoc/BUSCA 请手动上传运行，避免把第三方网页服务当作 API 自动调用。")
+    _render_deeploc_manual_workflow()
+    target_key, target_preset = _select_fusion_target()
+    candidate_rows = representatives.copy()
+    selected_ids = set(st.session_state.get(f"fusion_selected_candidate_ids_{target_key}", []))
+    source_options = ["使用全部代表候选"]
+    if target_key == "opn":
+        source_options.insert(0, "使用候选浏览已选项")
+        feedback = _opn_feedback_rows()
+        experimental = build_target_experimental_candidates(feedback, "opn")
+        if not experimental.empty:
+            known = set(candidate_rows["signal_peptide_sequence"].astype(str).str.upper())
+            experimental = experimental[
+                ~experimental["signal_peptide_sequence"].astype(str).str.upper().isin(known)
+            ]
+            candidate_rows = pd.concat([candidate_rows, experimental], ignore_index=True, sort=False)
+    source_mode = st.radio(
+        "候选来源",
+        source_options,
+        index=0 if selected_ids and target_key == "opn" else len(source_options) - 1,
+        horizontal=True,
+        key=f"fusion_candidate_source_{target_key}",
+    )
+    if source_mode == "使用候选浏览已选项":
+        candidate_rows = candidate_rows[
+            candidate_rows["candidate_id"].astype(str).isin(selected_ids)
+        ]
+        st.caption(f"当前使用 {len(candidate_rows)} 个 OPN 已选候选。")
+        if candidate_rows.empty:
+            st.warning("当前没有可用的 OPN 已选候选，请先在候选浏览中加入融合评估。")
     input_cols = st.columns(2)
     b_sequence = input_cols[0].text_area(
         "B 固定序列（例如 α-factor pro 区）",
@@ -743,12 +981,12 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
         help="当前默认值为去除明显 pre-region 的 α-factor pro 区候选片段，末端保留 LEKR/Kex2 加工位点。",
     )
     c_sequence = input_cols[1].text_area(
-        "C 固定序列（例如骨桥蛋白）",
-        value=DEFAULT_OPN_TARGET_SEQUENCE,
+        "C 固定序列（目标蛋白）",
+        value=target_preset.sequence,
         height=150,
         placeholder="粘贴目标蛋白氨基酸序列；支持带空格或换行",
         key="fusion_c_sequence",
-        help="当前默认值为用户提供的骨桥蛋白目标序列。",
+        help="可用目标下拉自动填入，也可以临时手动编辑；切换目标会恢复该目标的默认 C 序列。",
     )
     option_cols = st.columns([1.2, 1.2])
     construct_types = option_cols[0].multiselect(
@@ -769,9 +1007,11 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
     if build_clicked or st.session_state.get("fusion_construct_rows"):
         if build_clicked:
             result = build_fusion_constructs(
-                representatives.to_dict(orient="records"),
+                candidate_rows.to_dict(orient="records"),
                 b_sequence=b_sequence,
                 c_sequence=c_sequence,
+                target_key=target_key,
+                target_label=target_preset.label,
                 include_ac="AC" in construct_types,
                 include_abc="ABC" in construct_types,
                 include_controls=include_controls,
@@ -780,8 +1020,8 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
             st.session_state["fusion_construct_rows"] = result.rows
             st.session_state["fusion_construct_errors"] = result.errors
             st.session_state["fusion_localization_rows"] = result.rows
-            st.session_state["fusion_localization_rows_deeploc"] = result.rows
-            st.session_state["fusion_localization_rows_busca"] = result.rows
+            st.session_state[f"fusion_localization_rows_{target_key}_deeploc"] = result.rows
+            st.session_state[f"fusion_localization_rows_{target_key}_busca"] = result.rows
         errors = list(st.session_state.get("fusion_construct_errors", []))
         construct_rows = list(st.session_state.get("fusion_construct_rows", []))
         if errors:
@@ -794,6 +1034,8 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
 
 def _render_localization_import_panel() -> None:
     st.markdown("**导入 DeepLoc / BUSCA 结果**")
+    _select_fusion_target()
+    _render_deeploc_manual_workflow()
     construct_rows = list(st.session_state.get("fusion_construct_rows", []))
     if not construct_rows:
         st.info("当前会话还没有生成 AC/ABC 构建；如果已有缓存，会先直接展示缓存内容。重新上传外部结果前仍需先生成构建用于匹配。")
@@ -867,12 +1109,28 @@ def _render_fusion_downloads(construct_rows: list[dict[str, object]]) -> None:
     )
 
 
+
+def _render_deeploc_manual_workflow() -> None:
+    with st.expander("DeepLoc 手动上传流程", expanded=False):
+        st.markdown(
+            """
+            1. 在本页生成 AC/ABC 构建后，点击 **下载 AC/ABC FASTA**。
+            2. 打开 [DeepLoc 2.1](https://services.healthtech.dtu.dk/services/DeepLoc-2.1/)，上传刚下载的 FASTA 文件并运行预测。
+            3. 从 DeepLoc 下载结果表，优先使用 CSV/TSV 格式。
+            4. 回到左侧 **融合定位 → 导入 DeepLoc 结果**，选择 `DeepLoc`，上传结果表。
+            5. SigScout 会按 `construct_id` 合并结果、写入本地缓存，并刷新排序表和可复制序列区。
+            """
+        )
+        st.caption("注意：切换 OPN / hLF 目标后，需要重新生成对应目标的 FASTA；DeepLoc 缓存也会按目标蛋白分开保存。")
+
+
 def _render_localization_import(construct_rows: list[dict[str, object]]) -> None:
     st.markdown("**导入 DeepLoc / BUSCA 结果**")
     tool_name = st.selectbox("结果来源", ["deeploc", "busca"], format_func=lambda value: value.upper())
-    session_rows_key = f"fusion_localization_rows_{tool_name}"
-    cache_path = _localization_cache_path(tool_name)
-    cached_rows, cached_count = _load_localization_cache(tool_name, construct_rows)
+    target_key = _current_fusion_target_key()
+    session_rows_key = f"fusion_localization_rows_{target_key}_{tool_name}"
+    cache_path = _localization_cache_path(tool_name, target_key)
+    cached_rows, cached_count = _load_localization_cache(tool_name, construct_rows, target_key)
     cache_cols = st.columns([2.2, 1.0])
     if cached_count:
         if construct_rows:
@@ -886,7 +1144,7 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
         cache_cols[0].warning("检测到缓存文件，但无法读取有效 construct_id。")
     else:
         cache_cols[0].caption("当前没有可用的本地定位结果缓存。")
-    if cache_cols[1].button("清除当前缓存", disabled=not cache_path.exists(), key=f"{tool_name}_clear_localization_cache"):
+    if cache_cols[1].button("清除当前缓存", disabled=not cache_path.exists(), key=f"{target_key}_{tool_name}_clear_localization_cache"):
         cache_path.unlink(missing_ok=True)
         st.session_state[session_rows_key] = construct_rows
         st.success(f"已清除 {tool_name.upper()} 缓存。")
@@ -904,21 +1162,26 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
                     st.warning(error)
             if imported.imported_count:
                 st.session_state[session_rows_key] = imported.rows
-                _save_localization_cache(tool_name, imported.rows)
+                _save_localization_cache(tool_name, imported.rows, target_key)
                 st.success(f"已匹配 {imported.imported_count} 条 {tool_name.upper()} 结果。")
     else:
         st.caption("上传新的 DeepLoc/BUSCA 结果需要先生成当前 AC/ABC 构建，以便按 construct_id 匹配。")
     localization_rows = list(st.session_state.get(session_rows_key, construct_rows))
     if not localization_rows:
         return
+    feedback = _opn_feedback_rows() if target_key == "opn" else pd.DataFrame()
+    annotated_rows = annotate_construct_experimental_evidence(
+        localization_rows, feedback, target_key
+    ).to_dict(orient="records")
     enriched = []
-    for row in localization_rows:
+    for row in annotated_rows:
         updated = {**row, **summarize_localization(row)}
         updated.update(score_construct(updated))
         enriched.append(updated)
     frame = pd.DataFrame(enriched)
     frame = _sort_localization_results(frame)
     _render_localization_summary(frame)
+    _render_experimental_match_tabs(frame, target_key)
     columns = [
         "construct_id",
         "construct_type",
@@ -987,6 +1250,47 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
         file_name="fusion_constructs_with_localization.csv",
         mime="text/csv",
     )
+
+
+def _render_experimental_match_tabs(frame: pd.DataFrame, target_key: str) -> None:
+    ranking_tab, evidence_tab = st.tabs(["定位排序", "OPN 实验匹配"])
+    with ranking_tab:
+        st.caption("定位排序仅使用 DeepLoc/BUSCA、加工位点和风险扫描；实验反馈不参与总分。")
+        st.dataframe(
+            frame[[column for column in (
+                "construct_id", "construct_type", "candidate_id", "fine_priority_score",
+                "overall_score", "overall_priority",
+            ) if column in frame.columns]],
+            hide_index=True,
+            use_container_width=True,
+        )
+    with evidence_tab:
+        if target_key != "opn":
+            st.info("暂无 hLF 实验反馈。")
+            return
+        exact = frame[frame["experimental_match_type"].astype(str).eq("exact_construct")].copy()
+        related = frame[frame["experimental_match_type"].astype(str).eq("a_sequence_only")].copy()
+        missing = frame[frame["experimental_match_type"].astype(str).eq("result_missing")].copy()
+        evidence_columns = [
+            "construct_id", "construct_type", "candidate_id", "experimental_match_type",
+            "experimental_status", "experimental_unit_type", "experimental_relative_median",
+            "experimental_relative_min", "experimental_relative_max", "experimental_record_count",
+            "experimental_batch_count", "experimental_nucleotide_variant_count", "experimental_note",
+        ]
+        if not exact.empty:
+            st.markdown("**完整 AC 构建精确匹配**")
+            exact["_relative"] = pd.to_numeric(exact["experimental_relative_median"], errors="coerce")
+            exact = exact.sort_values("_relative", ascending=False).drop(columns="_relative")
+            st.dataframe(exact[[c for c in evidence_columns if c in exact]], hide_index=True, use_container_width=True)
+        if not related.empty:
+            st.markdown("**仅 A/leader 相关**")
+            st.warning("以下构建只匹配 A/leader，不代表当前 AC/ABC 完整构建已被实验验证。")
+            st.dataframe(related[[c for c in evidence_columns if c in related]], hide_index=True, use_container_width=True)
+        if not missing.empty:
+            st.markdown("**报告提及但结果缺失**")
+            st.dataframe(missing[[c for c in evidence_columns if c in missing]], hide_index=True, use_container_width=True)
+        if exact.empty and related.empty and missing.empty:
+            st.info("当前构建没有 OPN 精确序列实验关联；新增候选可能需要重新生成 FASTA 并运行定位评估。")
 
 
 def _render_localization_summary(frame: pd.DataFrame) -> None:
@@ -1084,6 +1388,15 @@ def _render_fusion_sequence_card(row: pd.Series) -> None:
             label_visibility="collapsed",
         )
         st.caption(str(row.get("processing_site_note", "")).strip())
+        match_type = str(row.get("experimental_match_type", "none"))
+        if match_type != "none":
+            st.info(
+                f"OPN 实验匹配：{match_type}；批内相对最佳 "
+                f"{_format_number(row.get('experimental_relative_median'))}；"
+                f"{row.get('experimental_batch_count', 0)} 轮 / "
+                f"{row.get('experimental_record_count', 0)} 条记录。"
+            )
+            st.caption(str(row.get("experimental_note", "")))
 
 
 def _construct_sequence_from_row(row: pd.Series | dict[str, object]) -> str:
@@ -1122,13 +1435,22 @@ def _format_number(value: object) -> str:
     return f"{number:.3f}" if abs(number) < 1 else f"{number:.1f}"
 
 
-def _localization_cache_path(tool_name: str) -> Path:
+
+def _current_fusion_target_key() -> str:
+    target_key = str(st.session_state.get("fusion_target_key", "opn")).strip().lower()
+    return target_key if target_key in FUSION_TARGET_PRESETS else "opn"
+
+
+def _localization_cache_path(tool_name: str, target_key: str | None = None) -> Path:
     safe_tool = "".join(ch for ch in tool_name.lower() if ch.isalnum() or ch in {"_", "-"}).strip("_-")
-    return PATHS.opn_screening_output_dir / f"fusion_localization_{safe_tool or 'external'}.csv"
+    safe_target = "".join(ch for ch in (target_key or _current_fusion_target_key()).lower() if ch.isalnum() or ch in {"_", "-"}).strip("_-")
+    if safe_target == "opn":
+        return PATHS.opn_screening_output_dir / f"fusion_localization_{safe_tool or 'external'}.csv"
+    return PATHS.opn_screening_output_dir / f"fusion_localization_{safe_target or 'target'}_{safe_tool or 'external'}.csv"
 
 
-def _save_localization_cache(tool_name: str, rows: list[dict[str, object]]) -> None:
-    path = _localization_cache_path(tool_name)
+def _save_localization_cache(tool_name: str, rows: list[dict[str, object]], target_key: str | None = None) -> None:
+    path = _localization_cache_path(tool_name, target_key)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(fusion_constructs_to_csv(rows), encoding="utf-8")
 
@@ -1136,8 +1458,9 @@ def _save_localization_cache(tool_name: str, rows: list[dict[str, object]]) -> N
 def _load_localization_cache(
     tool_name: str,
     construct_rows: list[dict[str, object]],
+    target_key: str | None = None,
 ) -> tuple[list[dict[str, object]], int]:
-    path = _localization_cache_path(tool_name)
+    path = _localization_cache_path(tool_name, target_key)
     if not path.exists():
         return construct_rows, 0
     try:

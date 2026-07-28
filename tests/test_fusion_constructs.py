@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from sigscout.services.fusion_constructs import (
     DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE,
+    DEFAULT_HLF_REFERENCE_SEQUENCE,
+    DEFAULT_HLF_TARGET_SEQUENCE,
     DEFAULT_OPN_TARGET_SEQUENCE,
+    FUSION_TARGET_PRESETS,
     build_fusion_constructs,
     fusion_constructs_to_fasta,
     import_localization_results,
@@ -29,7 +32,7 @@ def test_build_fusion_constructs_exports_ac_and_abc() -> None:
 
     fasta = fusion_constructs_to_fasta(result.rows)
 
-    assert ">SP_A_AC|source=SP_A|type=AC|len=12" in fasta
+    assert ">SP_A_AC|source=SP_A|type=AC|target=custom|len=12" in fasta
     assert "MKAALLEAEAQWERTY" in fasta
 
 
@@ -74,6 +77,37 @@ def test_default_b_and_c_sequences_generate_expected_opn_constructs() -> None:
     assert by_type["ABC"]["b_length"] == 66
     assert by_type["ABC"]["construct_length"] == 370
     assert by_type["ABC"]["b_c_junction"] == "VSLEKR|IPVKQA"
+
+def test_hlf_target_preset_uses_mature_lactoferrin_sequence() -> None:
+    preset = FUSION_TARGET_PRESETS["hlf"]
+
+    assert len(DEFAULT_HLF_REFERENCE_SEQUENCE) == 710
+    assert DEFAULT_HLF_REFERENCE_SEQUENCE.startswith("MKLVFLVLLFLGALGLCLA")
+    assert preset.sequence == DEFAULT_HLF_TARGET_SEQUENCE
+    assert preset.sequence == DEFAULT_HLF_REFERENCE_SEQUENCE[19:]
+    assert preset.sequence.startswith("GRRRSV")
+    assert not preset.sequence.startswith("MKLVFL")
+    assert len(preset.sequence) == 691
+
+
+def test_hlf_constructs_include_target_metadata() -> None:
+    result = build_fusion_constructs(
+        [_signal_row("SP_A", "MKAALL")],
+        b_sequence=DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE,
+        c_sequence=DEFAULT_HLF_TARGET_SEQUENCE,
+        target_key="hlf",
+        target_label=FUSION_TARGET_PRESETS["hlf"].label,
+        include_abc=False,
+        include_controls=False,
+    )
+
+    assert result.errors == []
+    row = result.rows[0]
+    assert row["construct_id"] == "SP_A_AC"
+    assert row["target_key"] == "hlf"
+    assert row["target_label"] == "hLF / 人乳铁蛋白"
+    assert row["c_length"] == 691
+    assert row["construct_length"] == 697
 
 
 def test_positive_control_leader_generates_control_construct() -> None:

@@ -4,7 +4,14 @@ from sigscout.services.inputs import (
     StaticCandidateInputProvider,
     StaticTargetProteinInputProvider,
 )
+from sigscout.services.experimental_evidence import (
+    annotate_candidate_experimental_evidence,
+    annotate_construct_experimental_evidence,
+    build_target_experimental_candidates,
+)
 from sigscout.services.fusion_constructs import (
+    DEFAULT_HLF_TARGET_SEQUENCE,
+    FUSION_TARGET_PRESETS,
     build_fusion_constructs,
     fusion_constructs_to_csv,
     fusion_constructs_to_fasta,
@@ -21,11 +28,16 @@ from sigscout.services.screening import (
 
 __all__ = [
     "CsvCandidateInputProvider",
+    "DEFAULT_HLF_TARGET_SEQUENCE",
+    "FUSION_TARGET_PRESETS",
     "SignalPeptideLibraryService",
     "SignalPeptideScreeningResult",
     "SignalPeptideScreeningService",
     "StaticCandidateInputProvider",
     "StaticTargetProteinInputProvider",
+    "annotate_candidate_experimental_evidence",
+    "annotate_construct_experimental_evidence",
+    "build_target_experimental_candidates",
     "build_fusion_constructs",
     "choose_representative",
     "cluster_similar_signal_peptides",

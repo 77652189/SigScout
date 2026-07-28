@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-18",
+  "version": "2026-07-24",
   "notes": "Controlled identifier mapping for auxiliary source-protein route annotation. GO IDs are matched against GO ancestors when QuickGO ontology data is available; UniProt SL IDs and feature types are exact controlled values from UniProtKB.",
   "routes": [
     {
@@ -8,7 +8,8 @@
       "go_ancestor_ids": [
         "GO:0016020",
         "GO:0005886",
-        "GO:0005618"
+        "GO:0005618",
+        "GO:0009986"
       ],
       "uniprot_sl_ids": [
         "SL-0039",

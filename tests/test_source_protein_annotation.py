@@ -90,6 +90,19 @@ def test_source_protein_annotation_uses_quickgo_go_ancestors() -> None:
     assert "IDA/实验" in row["source_protein_route_basis"]
 
 
+def test_cell_surface_go_term_maps_to_membrane_or_anchor_route() -> None:
+    row = {
+        "source_protein_go_terms": "GO:0009986 cell surface [IEA:TreeGrafter]",
+        "source_protein_go_ids": "GO:0009986",
+        "source_protein_go_evidence": "IEA:TreeGrafter",
+    }
+
+    annotated = annotate_source_protein_route(row)
+
+    assert annotated["source_protein_route"] == "膜/锚定倾向"
+    assert "GO:0009986 cell surface" in annotated["source_protein_route_basis"]
+
+
 def test_source_protein_annotation_preserves_existing_quickgo_when_not_refetched() -> None:
     row = {
         "accession": "P12345",

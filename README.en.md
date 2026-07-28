@@ -30,7 +30,7 @@ SigScout does not predict real secretion efficiency. Its role is to narrow the c
 | USPNet review | Optionally call local USPNet-fast; missing USPNet does not block rule-based screening |
 | Source-protein evidence | Use structured UniProt localization, GO cellular component terms, feature evidence codes, and optional QuickGO/GOA evidence |
 | Similarity clustering | Group highly similar signal peptides, export representatives, and preserve full duplicate/source evidence |
-| Fusion constructs | Generate AC / ABC fusion proteins, construct indexes, positive leader controls, and processing-risk fields |
+| Fusion constructs | Switch between multiple target-protein presets, then generate AC / ABC fusion proteins, construct indexes, positive leader controls, and processing-risk fields |
 | Localization import | Merge DeepLoc 2.1 or BUSCA CSV/TSV outputs back into construct priority tables |
 | Exports | Write CSV, FASTA, and JSON summaries for wet-lab discussion or downstream tools |
 
@@ -127,7 +127,7 @@ Standard screening outputs:
 | `method_representative_candidates.fasta` | Representative candidates in FASTA format |
 | `signal_peptide_method_comparison_summary.json` | Run summary |
 
-Fusion outputs include AC / ABC construct FASTA, construct-index CSV, optional control leader rows, processing notes, localization import fields, risk flags, and priority scores.
+Fusion outputs include AC / ABC construct FASTA, construct-index CSV, optional control leader rows, processing notes, localization import fields, risk flags, and priority scores. SigScout currently supports switching between multiple target-protein presets; specific preset sequences are kept in local configuration.
 
 ## Boundaries
 

@@ -30,7 +30,7 @@ SigScout 是一个蛋白层面的信号肽工作台，用于为分泌表达目�
 | USPNet 复核 | 可选调用本地 USPNet-fast；未安装时不阻断规则筛选 |
 | 来源蛋白证据 | 基于 UniProt 结构化定位、GO cellular component、feature evidence code 和可选 QuickGO/GOA 证据判断来源蛋白路线 |
 | 相似聚类 | 对高度相似的信号肽分组，输出代表序列，同时保留完整候选和重复证据 |
-| 融合构建 | 生成 AC / ABC 融合蛋白序列、构建索引、阳性引导肽对照和基础加工风险扫描 |
+| 融合构建 | 支持多个目标蛋白预设之间切换，生成 AC / ABC 融合蛋白序列、构建索引、阳性引导肽对照和基础加工风险扫描 |
 | 定位结果导入 | 导入 DeepLoc 2.1 或 BUSCA 的 CSV/TSV 结果，合并到构建排序表 |
 | 导出 | 输出 CSV、FASTA 和 JSON 摘要，用于实验讨论或下游工具衔接 |
 
@@ -127,7 +127,7 @@ python -m sigscout.cli annotate-source --quickgo
 | `method_representative_candidates.fasta` | 代表候选 FASTA |
 | `signal_peptide_method_comparison_summary.json` | 运行摘要 |
 
-融合构建输出包括 AC / ABC 构建 FASTA、构建索引 CSV、可选对照引导肽记录、加工说明、定位结果导入字段、风险标记和优先级评分。
+融合构建输出包括 AC / ABC 构建 FASTA、构建索引 CSV、可选对照引导肽记录、加工说明、定位结果导入字段、风险标记和优先级评分。当前支持多个目标蛋白预设之间切换，具体预设序列以本地配置为准。
 
 ## 使用边界
 

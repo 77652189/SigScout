@@ -171,6 +171,11 @@ class SignalPeptideScreeningService:
         output_dir = paths["output_dir"]
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        previous_annotation_rows = (
+            _read_csv_rows(paths["comparison_csv"])
+            if paths["comparison_csv"].exists()
+            else []
+        )
         persisted_discovery = None if refresh_uniprot else self._load_persisted_uniprot_discovery(
             taxon_id=taxon_id,
             max_records=max_records,
@@ -188,6 +193,9 @@ class SignalPeptideScreeningService:
             _ensure_screening_row_defaults(_ensure_target_context(row, self.target_key, self.target_label))
             for row in discovery.rows
         ]
+        candidate_rows = _merge_preserved_source_annotations(
+            candidate_rows, previous_annotation_rows
+        )
         write_candidate_fasta(paths["input_fasta"], candidate_rows)
 
         errors = list(discovery.errors)
@@ -737,6 +745,33 @@ def _coerce_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _merge_preserved_source_annotations(
+    current_rows: list[dict[str, object]],
+    previous_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Keep completed source evidence for unchanged UniProt accessions across refreshes."""
+    completed_by_accession = {
+        str(row.get("accession", "")).strip(): row
+        for row in previous_rows
+        if str(row.get("accession", "")).strip()
+        and str(row.get("source_protein_annotation_status", "")).strip() == "已评估"
+    }
+    if not completed_by_accession:
+        return current_rows
+    merged_rows = []
+    for row in current_rows:
+        previous = completed_by_accession.get(str(row.get("accession", "")).strip())
+        if previous is None:
+            merged_rows.append(row)
+            continue
+        updated = dict(row)
+        for key, value in previous.items():
+            if key.startswith("source_protein_"):
+                updated[key] = value
+        merged_rows.append(updated)
+    return merged_rows
 
 
 def _ensure_screening_row_defaults(row: dict[str, object]) -> dict[str, object]:
