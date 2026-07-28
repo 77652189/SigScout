@@ -32,6 +32,7 @@ SigScout does not predict real secretion efficiency. Its role is to narrow the c
 | Similarity clustering | Group highly similar signal peptides, export representatives, and preserve full duplicate/source evidence |
 | Fusion constructs | Switch between multiple target-protein presets, then generate AC / ABC fusion proteins, construct indexes, positive leader controls, and processing-risk fields |
 | Localization import | Merge DeepLoc 2.1 or BUSCA CSV/TSV outputs back into construct priority tables |
+| Experimental feedback loop | Import wet-lab measurement results, match them back onto candidates/constructs by exact sequence, and build the next guided-exploration test panel from measured data |
 | Exports | Write CSV, FASTA, and JSON summaries for wet-lab discussion or downstream tools |
 
 ## Workflow
@@ -49,6 +50,8 @@ flowchart LR
     G --> H["AC / ABC fusion constructs"]
     H --> I["DeepLoc / BUSCA import"]
     I --> J["Priority table for wet-lab review"]
+    J --> K["Experimental feedback import and guided exploration"]
+    K --> G
 ```
 
 Typical downstream use:
@@ -57,7 +60,7 @@ Typical downstream use:
 2. Generate target-protein fusion constructs.
 3. Review localization risks with external tools.
 4. Export selected amino-acid sequences to CDS-level tools such as PichiaCLM.
-5. Feed wet-lab results back into candidate prioritization.
+5. Feed wet-lab results back into candidate prioritization, and use guided exploration to plan the next round of test candidates.
 
 ## Architecture
 
@@ -65,7 +68,7 @@ Typical downstream use:
 flowchart TD
     UI["Streamlit UI<br/>src/sigscout/ui"]
     CLI["CLI<br/>src/sigscout/cli.py"]
-    SERVICES["Services<br/>library / screening / rules / fusion / exports"]
+    SERVICES["Services<br/>library / screening / rules / fusion / experimental feedback / exports"]
     CORE["Core models<br/>candidate and target inputs"]
     ADAPTERS["Adapters<br/>UniProt / QuickGO / USPNet / process runner"]
     DATA["Local outputs<br/>local_runs / CSV / FASTA / JSON"]
@@ -79,10 +82,10 @@ flowchart TD
 
 | Layer | Key path | Responsibility |
 |---|---|---|
-| UI | [`src/sigscout/ui/streamlit_app.py`](src/sigscout/ui/streamlit_app.py) | Local workbench for screening, source annotation, representative browsing, fusion generation, and localization import |
+| UI | [`src/sigscout/ui/streamlit_app.py`](src/sigscout/ui/streamlit_app.py) | Local workbench for screening, source annotation, representative browsing, fusion generation, localization import, and experimental-feedback browsing |
 | CLI | [`src/sigscout/cli.py`](src/sigscout/cli.py) | Scriptable discovery, screening, annotation, and app launch |
 | Core | [`src/sigscout/core/`](src/sigscout/core/) | Candidate records, target inputs, sequence cleaning, and path discovery |
-| Services | [`src/sigscout/services/`](src/sigscout/services/) | Candidate library, rule scoring, USPNet merge, clustering, source-route annotation, fusion constructs, and exports |
+| Services | [`src/sigscout/services/`](src/sigscout/services/) | Candidate library, rule scoring, USPNet merge, clustering, source-route annotation, fusion constructs, experimental-feedback matching and guided exploration, and exports |
 | Adapters | [`src/sigscout/adapters/`](src/sigscout/adapters/) | UniProt, QuickGO/GOA, USPNet, and local process integration |
 | Tests | [`tests/`](tests/) | Focused checks for rules, library import, screening, source annotation, USPNet, and fusion constructs |
 
@@ -145,6 +148,7 @@ Fusion outputs include AC / ABC construct FASTA, construct-index CSV, optional c
 - Preserve QuickGO/GOA GO IDs, evidence codes, references, and query dates when using source-protein evidence.
 - Place optional USPNet-fast under `external/USPNet/` or configure `USPNET_REPO` / `USPNET_MODEL_DIR`.
 - Runtime outputs are written to `local_runs/` and ignored by Git.
+- When importing wet-lab feedback, keep batch, assay method, and measurement date. Candidate tiering is a ranking heuristic, not an absolute cross-batch yield comparison, and does not imply statistical significance.
 
 ## Tests
 

@@ -32,6 +32,7 @@ SigScout 是一个蛋白层面的信号肽工作台，用于为分泌表达目�
 | 相似聚类 | 对高度相似的信号肽分组，输出代表序列，同时保留完整候选和重复证据 |
 | 融合构建 | 支持多个目标蛋白预设之间切换，生成 AC / ABC 融合蛋白序列、构建索引、阳性引导肽对照和基础加工风险扫描 |
 | 定位结果导入 | 导入 DeepLoc 2.1 或 BUSCA 的 CSV/TSV 结果，合并到构建排序表 |
+| 实验反馈闭环 | 导入湿实验测量结果，按精确序列匹配回候选/构建，并基于已测数据生成下一轮引导探索候选面板 |
 | 导出 | 输出 CSV、FASTA 和 JSON 摘要，用于实验讨论或下游工具衔接 |
 
 ## 工作流程
@@ -49,6 +50,8 @@ flowchart LR
     G --> H["AC / ABC 融合构建"]
     H --> I["DeepLoc / BUSCA 结果导入"]
     I --> J["湿实验复核优先级表"]
+    J --> K["实验反馈导入与引导探索"]
+    K --> G
 ```
 
 典型下游用法：
@@ -57,7 +60,7 @@ flowchart LR
 2. 为目标蛋白生成融合构建。
 3. 用外部定位工具补充定位风险复核。
 4. 将选中的氨基酸序列导出到 PichiaCLM 等 CDS 层工具。
-5. 将湿实验结果回填到候选优先级讨论中。
+5. 将湿实验结果回填到候选优先级讨论中，并用引导探索规划下一轮测试候选。
 
 ## 架构概览
 
@@ -65,7 +68,7 @@ flowchart LR
 flowchart TD
     UI["Streamlit 界面<br/>src/sigscout/ui"]
     CLI["CLI<br/>src/sigscout/cli.py"]
-    SERVICES["服务层<br/>library / screening / rules / fusion / exports"]
+    SERVICES["服务层<br/>library / screening / rules / fusion / experimental feedback / exports"]
     CORE["核心模型<br/>候选和目标输入"]
     ADAPTERS["适配层<br/>UniProt / QuickGO / USPNet / 本地进程"]
     DATA["本地输出<br/>local_runs / CSV / FASTA / JSON"]
@@ -79,10 +82,10 @@ flowchart TD
 
 | 层级 | 关键路径 | 职责 |
 |---|---|---|
-| 界面层 | [`src/sigscout/ui/streamlit_app.py`](src/sigscout/ui/streamlit_app.py) | 本地工作台，负责筛选、来源注释、代表序列浏览、融合构建和定位结果导入 |
+| 界面层 | [`src/sigscout/ui/streamlit_app.py`](src/sigscout/ui/streamlit_app.py) | 本地工作台，负责筛选、来源注释、代表序列浏览、融合构建、定位结果导入和实验反馈浏览 |
 | CLI | [`src/sigscout/cli.py`](src/sigscout/cli.py) | 可脚本化的发现、筛选、注释和页面启动入口 |
 | 核心层 | [`src/sigscout/core/`](src/sigscout/core/) | 候选记录、目标输入、序列清洗和路径发现 |
-| 服务层 | [`src/sigscout/services/`](src/sigscout/services/) | 候选库、规则评分、USPNet 合并、聚类、来源路线注释、融合构建和导出 |
+| 服务层 | [`src/sigscout/services/`](src/sigscout/services/) | 候选库、规则评分、USPNet 合并、聚类、来源路线注释、融合构建、实验反馈匹配与引导探索和导出 |
 | 适配层 | [`src/sigscout/adapters/`](src/sigscout/adapters/) | UniProt、QuickGO/GOA、USPNet 和本地进程集成 |
 | 测试 | [`tests/`](tests/) | 规则、候选库导入、筛选、来源注释、USPNet 和融合构建的局部测试 |
 
@@ -145,6 +148,7 @@ python -m sigscout.cli annotate-source --quickgo
 - 使用来源蛋白证据时，保留 QuickGO/GOA 的 GO ID、证据代码、参考文献和查询日期。
 - 可选 USPNet-fast 可放在 `external/USPNet/`，或通过 `USPNET_REPO` / `USPNET_MODEL_DIR` 配置。
 - 运行输出写入 `local_runs/`，并由 Git 忽略。
+- 导入湿实验反馈时，保留批次、检测方法和测量日期；候选分层是排序规则，不是跨轮次绝对产量比较，也不表示统计显著性。
 
 ## 测试
 
