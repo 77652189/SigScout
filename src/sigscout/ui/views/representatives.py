@@ -102,13 +102,18 @@ def _render_representative_overview(rows: pd.DataFrame, representatives: pd.Data
 
 
 def _render_candidate_filters(representatives: pd.DataFrame) -> pd.DataFrame:
-    filter_cols = st.columns([1.2, 1.2, 1.6, 1.0])
     route_options = _sorted_unique(representatives["source_protein_route"])
     evidence_options = _sorted_unique(representatives["source_protein_evidence_level"])
-    selected_routes = filter_cols[0].multiselect("来源分类", route_options, default=route_options)
-    selected_evidence = filter_cols[1].multiselect("证据等级", evidence_options, default=evidence_options)
-    search = filter_cols[2].text_input("搜索", placeholder="候选 ID / accession / 来源蛋白 / 证据")
-    sort_by = filter_cols[3].selectbox(
+    top_cols = st.columns([1.4, 1.0])
+    selected_routes = top_cols[0].multiselect(
+        "来源分类", route_options, help="不选表示不按来源分类筛选（等同于全选）。"
+    )
+    selected_evidence = top_cols[1].multiselect(
+        "证据等级", evidence_options, help="不选表示不按证据等级筛选（等同于全选）。"
+    )
+    bottom_cols = st.columns([1.6, 1.0])
+    search = bottom_cols[0].text_input("搜索", placeholder="候选 ID / accession / 来源蛋白 / 证据")
+    sort_by = bottom_cols[1].selectbox(
         "排序",
         ["综合推荐优先", "证据较强优先", "规则分数高优先", "相似分组大优先"],
         index=0,
