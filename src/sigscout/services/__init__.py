@@ -18,9 +18,8 @@ from sigscout.services.fusion_constructs import (
 )
 from sigscout.services.localization_import import import_localization_results
 from sigscout.services.rules import score_signal_peptide
-from sigscout.services.screening import (
-    SignalPeptideScreeningResult,
-    SignalPeptideScreeningService,
+from sigscout.services.screening import SignalPeptideScreeningResult, SignalPeptideScreeningService
+from sigscout.services.similarity import (
     choose_representative,
     cluster_similar_signal_peptides,
     signal_peptide_identity,

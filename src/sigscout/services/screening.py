@@ -14,6 +14,7 @@ from sigscout.core.models import UniProtCandidateLibraryResult
 from sigscout.services.exports import write_candidate_fasta, write_csv, write_json, write_signal_peptide_fasta
 from sigscout.services.library import SignalPeptideLibraryService
 from sigscout.services.rules import score_signal_peptide
+from sigscout.services.similarity import cluster_similar_signal_peptides
 from sigscout.services.source_protein_annotation import (
     annotate_source_protein_routes,
     ensure_source_protein_annotation_defaults,
@@ -29,7 +30,6 @@ RECOMMENDED_FASTA = "method_recommended_candidates.fasta"
 REPRESENTATIVES_CSV = "signal_peptide_representatives.csv"
 REPRESENTATIVES_FASTA = "method_representative_candidates.fasta"
 METHOD_SUMMARY_JSON = "signal_peptide_method_comparison_summary.json"
-SIMILARITY_IDENTITY_THRESHOLD = 0.80
 
 
 @dataclass(frozen=True)
@@ -172,6 +172,42 @@ class SignalPeptideScreeningService:
         output_dir = paths["output_dir"]
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        candidate_rows, discovery, reused_uniprot = self._discover_step(
+            paths,
+            taxon_id=taxon_id,
+            max_records=max_records,
+            reviewed_only=reviewed_only,
+            refresh_uniprot=refresh_uniprot,
+        )
+        errors = list(discovery.errors)
+        summary = self._build_initial_summary(
+            taxon_id=taxon_id,
+            max_records=max_records,
+            reviewed_only=reviewed_only,
+            discovery=discovery,
+            reused_uniprot=reused_uniprot,
+        )
+
+        if not candidate_rows:
+            return self._empty_screening_result(paths, output_dir, summary, errors)
+
+        screened_rows = self._rule_score_step(candidate_rows, summary)
+        screened_rows, uspnet_raw_dir = self._uspnet_merge_step(
+            screened_rows, output_dir, paths["input_fasta"], summary, errors, timeout_seconds
+        )
+        screened_rows = self._similarity_step(screened_rows, summary)
+
+        return self._finalize_screening_result(paths, output_dir, screened_rows, summary, errors, uspnet_raw_dir)
+
+    def _discover_step(
+        self,
+        paths: dict[str, Path],
+        *,
+        taxon_id: int,
+        max_records: int,
+        reviewed_only: bool,
+        refresh_uniprot: bool,
+    ) -> tuple[list[dict[str, object]], UniProtCandidateLibraryResult, bool]:
         previous_annotation_rows = (
             _read_csv_rows(paths["comparison_csv"])
             if paths["comparison_csv"].exists()
@@ -194,13 +230,20 @@ class SignalPeptideScreeningService:
             _ensure_screening_row_defaults(_ensure_target_context(row, self.target_key, self.target_label))
             for row in discovery.rows
         ]
-        candidate_rows = _merge_preserved_source_annotations(
-            candidate_rows, previous_annotation_rows
-        )
+        candidate_rows = _merge_preserved_source_annotations(candidate_rows, previous_annotation_rows)
         write_candidate_fasta(paths["input_fasta"], candidate_rows)
+        return candidate_rows, discovery, reused_uniprot
 
-        errors = list(discovery.errors)
-        summary: dict[str, object] = {
+    def _build_initial_summary(
+        self,
+        *,
+        taxon_id: int,
+        max_records: int,
+        reviewed_only: bool,
+        discovery: UniProtCandidateLibraryResult,
+        reused_uniprot: bool,
+    ) -> dict[str, object]:
+        return {
             "target_key": self.target_key,
             "target_label": self.target_label,
             "taxon_id": taxon_id,
@@ -233,33 +276,54 @@ class SignalPeptideScreeningService:
             "similar_candidates_collapsed_count": 0,
         }
 
-        if not candidate_rows:
-            message = "UniProt 没有返回可用于比较的候选信号肽。"
-            write_json(paths["summary_json"], {**summary, "success": False, "message": message, "errors": errors})
-            return SignalPeptideScreeningResult(
-                available=False,
-                success=False,
-                message=message,
-                summary=summary,
-                rows=[],
-                output_dir=output_dir,
-                uniprot_csv=paths["uniprot_csv"],
-                duplicate_csv=paths["duplicate_csv"],
-                input_fasta=paths["input_fasta"],
-                representatives_csv=paths["representatives_csv"],
-                representatives_fasta=paths["representatives_fasta"],
-                summary_json=paths["summary_json"],
-                errors=errors,
-            )
+    def _empty_screening_result(
+        self,
+        paths: dict[str, Path],
+        output_dir: Path,
+        summary: dict[str, object],
+        errors: list[str],
+    ) -> SignalPeptideScreeningResult:
+        message = "UniProt 没有返回可用于比较的候选信号肽。"
+        write_json(paths["summary_json"], {**summary, "success": False, "message": message, "errors": errors})
+        return SignalPeptideScreeningResult(
+            available=False,
+            success=False,
+            message=message,
+            summary=summary,
+            rows=[],
+            output_dir=output_dir,
+            uniprot_csv=paths["uniprot_csv"],
+            duplicate_csv=paths["duplicate_csv"],
+            input_fasta=paths["input_fasta"],
+            representatives_csv=paths["representatives_csv"],
+            representatives_fasta=paths["representatives_fasta"],
+            summary_json=paths["summary_json"],
+            errors=errors,
+        )
 
+    def _rule_score_step(
+        self,
+        candidate_rows: list[dict[str, object]],
+        summary: dict[str, object],
+    ) -> list[dict[str, object]]:
         screened_rows = [_add_rule_screening(row) for row in candidate_rows]
         summary["rules_passed"] = sum(1 for row in screened_rows if row["rules_pass"])
         summary["rules_high_priority"] = sum(1 for row in screened_rows if row["rules_high_priority"])
         summary.update(_rules_score_distribution(screened_rows))
+        return screened_rows
 
+    def _uspnet_merge_step(
+        self,
+        screened_rows: list[dict[str, object]],
+        output_dir: Path,
+        input_fasta: Path,
+        summary: dict[str, object],
+        errors: list[str],
+        timeout_seconds: int,
+    ) -> tuple[list[dict[str, object]], Path]:
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         uspnet_raw_dir = output_dir / "uspnet_raw" / run_id
-        uspnet_result = self.uspnet_adapter.run(paths["input_fasta"], uspnet_raw_dir, timeout_seconds=timeout_seconds)
+        uspnet_result = self.uspnet_adapter.run(input_fasta, uspnet_raw_dir, timeout_seconds=timeout_seconds)
         summary["uspnet_available"] = uspnet_result.available
         summary["uspnet_success"] = uspnet_result.success
         if not uspnet_result.available:
@@ -271,14 +335,32 @@ class SignalPeptideScreeningService:
             summary["uspnet_passed"] = sum(1 for row in screened_rows if row["uspnet_pass"])
             if not uspnet_result.success:
                 errors.append(uspnet_result.message)
+        return screened_rows, uspnet_raw_dir
 
+    def _similarity_step(
+        self,
+        screened_rows: list[dict[str, object]],
+        summary: dict[str, object],
+    ) -> list[dict[str, object]]:
         uspnet_results_usable = bool(summary["uspnet_success"])
         screened_rows = [_finalize_recommendation(row, uspnet_results_usable) for row in screened_rows]
         screened_rows = cluster_similar_signal_peptides(screened_rows)
         summary["consensus_passed"] = sum(1 for row in screened_rows if row["consensus_pass"])
-        summary["needs_external_review"] = sum(1 for row in screened_rows if row["screening_status"] == "规则高优先级，待 USPNet 复核")
+        summary["needs_external_review"] = sum(
+            1 for row in screened_rows if row["screening_status"] == "规则高优先级，待 USPNet 复核"
+        )
         summary.update(_similarity_summary(screened_rows))
+        return screened_rows
 
+    def _finalize_screening_result(
+        self,
+        paths: dict[str, Path],
+        output_dir: Path,
+        screened_rows: list[dict[str, object]],
+        summary: dict[str, object],
+        errors: list[str],
+        uspnet_raw_dir: Path,
+    ) -> SignalPeptideScreeningResult:
         recommended_rows = [
             row
             for row in screened_rows
@@ -551,115 +633,6 @@ def _finalize_recommendation(row: dict[str, object], uspnet_results_usable: bool
         "screening_status": status,
         "recommended_for_draft_library": recommended,
     }
-
-
-def cluster_similar_signal_peptides(
-    rows: list[dict[str, object]],
-    identity_threshold: float = SIMILARITY_IDENTITY_THRESHOLD,
-) -> list[dict[str, object]]:
-    groups: list[list[dict[str, object]]] = []
-    seen_exact_sequences: set[str] = set()
-    for row in rows:
-        sequence = str(row.get("signal_peptide_sequence", "")).strip().upper()
-        row_copy = dict(row)
-        if sequence and sequence in seen_exact_sequences:
-            groups.append([row_copy])
-            continue
-        placed = False
-        for group in groups:
-            if any(
-                _is_similar_but_not_identical(sequence, str(member.get("signal_peptide_sequence", "")), identity_threshold)
-                for member in group
-            ):
-                group.append(row_copy)
-                placed = True
-                break
-        if not placed:
-            groups.append([row_copy])
-        if sequence:
-            seen_exact_sequences.add(sequence)
-
-    clustered_rows: list[dict[str, object]] = []
-    for index, group in enumerate(groups, start=1):
-        representative = choose_representative(group)
-        representative_id = str(representative.get("candidate_id", ""))
-        group_id = f"SPG_{index:03d}"
-        for row in group:
-            similarity = signal_peptide_identity(
-                str(row.get("signal_peptide_sequence", "")),
-                str(representative.get("signal_peptide_sequence", "")),
-            )
-            clustered_rows.append(
-                {
-                    **row,
-                    "similarity_group_id": group_id,
-                    "is_representative": str(row.get("candidate_id", "")) == representative_id,
-                    "representative_id": representative_id,
-                    "similarity_to_representative": round(similarity, 3),
-                    "similar_group_size": len(group),
-                }
-            )
-    return clustered_rows
-
-
-def choose_representative(group_rows: list[dict[str, object]]) -> dict[str, object]:
-    if not group_rows:
-        return {}
-    return sorted(group_rows, key=_representative_sort_key)[0]
-
-
-def signal_peptide_identity(seq_a: str, seq_b: str) -> float:
-    a = seq_a.strip().upper()
-    b = seq_b.strip().upper()
-    if not a or not b:
-        return 0.0
-    distance = _levenshtein_distance(a, b)
-    return max(0.0, 1.0 - (distance / max(len(a), len(b))))
-
-
-def _is_similar_but_not_identical(seq_a: str, seq_b: str, identity_threshold: float) -> bool:
-    if not seq_a or not seq_b or seq_a.strip().upper() == seq_b.strip().upper():
-        return False
-    return signal_peptide_identity(seq_a, seq_b) >= identity_threshold
-
-
-def _representative_sort_key(row: dict[str, object]) -> tuple[object, ...]:
-    return (
-        not bool(row.get("consensus_pass")),
-        not _uspnet_supports_signal_peptide(row),
-        not bool(row.get("rules_high_priority")),
-        -safe_int_from_float(row.get("rules_score")),
-        not _reviewed_or_strong_evidence(row),
-        len(str(row.get("signal_peptide_sequence", ""))),
-        str(row.get("candidate_id", "")),
-    )
-
-
-def _uspnet_supports_signal_peptide(row: dict[str, object]) -> bool:
-    return bool(row.get("uspnet_pass")) or str(row.get("uspnet_prediction", "")).strip().upper() == "SP"
-
-
-def _reviewed_or_strong_evidence(row: dict[str, object]) -> bool:
-    if bool(row.get("uniprot_reviewed")):
-        return True
-    text = " ".join(
-        str(row.get(key, ""))
-        for key in ("source_note", "rationale", "protein_existence", "evidence_level")
-    ).lower()
-    return "reviewed" in text or "evidence at protein level" in text
-
-
-def _levenshtein_distance(a: str, b: str) -> int:
-    previous = list(range(len(b) + 1))
-    for index_a, char_a in enumerate(a, start=1):
-        current = [index_a]
-        for index_b, char_b in enumerate(b, start=1):
-            substitution = previous[index_b - 1] + (0 if char_a == char_b else 1)
-            insertion = current[index_b - 1] + 1
-            deletion = previous[index_b] + 1
-            current.append(min(substitution, insertion, deletion))
-        previous = current
-    return previous[-1]
 
 
 def _representative_model_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:

@@ -5,8 +5,8 @@ from pathlib import Path
 
 from sigscout.adapters.uspnet import USPNetPrediction, USPNetRunResult
 from sigscout.core.models import UniProtCandidateLibraryResult
-from sigscout.services.screening import (
-    SignalPeptideScreeningService,
+from sigscout.services.screening import SignalPeptideScreeningService
+from sigscout.services.similarity import (
     choose_representative,
     cluster_similar_signal_peptides,
     signal_peptide_identity,

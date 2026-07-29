@@ -10,9 +10,9 @@
 - 每个 Phase 建议单独提交，commit message 用 `refactor(...): ...`，方便出问题时单独回滚某一步。
 - 涉及 README/`docs/` 里目标蛄白名称的部分，本计划不改 README 内容，只改代码结构，不触发 [REQUIREMENTS.md](REQUIREMENTS.md) 第 5 节的脱敏边界。
 
-推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4、3 已完成，下一步是 Phase 2。
+推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4、3、2 已完成，下一步是 Phase 1（UI 拆分，风险最高的一个）。
 
-**跨 Phase 的通用教训**（Phase 0、4、3 都踩到过，后面的 Phase 也要留意）：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`），必须先确认依赖方向再决定谁放哪个文件。三次都是先看了完整实现/依赖图才发现问题，不是一开始就预料到的——Phase 2（拆 `screening.py`）动手前先做同样的依赖排查。
+**跨 Phase 的通用教训**（Phase 0、4、3、2 都踩到过，Phase 1 也要留意）：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`）；Phase 2 发现计划漏掉了 `choose_representative` 的三个隐藏私有依赖，同时发现计划里点名要改的三个文件（`cli.py`/`streamlit_app.py`/`experimental_browser.py`）实际全仓库 grep 后都不需要改。四次都是先看了完整实现/依赖图/grep 全部消费者才发现和计划不一样的地方——Phase 1（拆 `streamlit_app.py`）动手前，同样先枚举每个 `_render_*` 辅助函数实际被谁调用，不要只按计划里列的清单假设边界正确。
 
 ---
 
@@ -88,15 +88,22 @@
 
 ---
 
-## Phase 2 — 拆 `services/screening.py`（898 行，最大目标）
+## Phase 2 — 拆 `services/screening.py` ✅ 完成于 2026-07-28（884 → 857 行；god-method 160 → 39 行）
 
-- [ ] 新建 `services/similarity.py`，移入：`cluster_similar_signal_peptides`、`choose_representative`、`signal_peptide_identity`、`_levenshtein_distance`、`_is_similar_but_not_identical`、`SIMILARITY_IDENTITY_THRESHOLD`。
-- [ ] 更新 `services/experimental_exploration.py`：改成从 `services/similarity.py` import `signal_peptide_identity`，不再依赖整个 `screening.py`。
-- [ ] 把 `SignalPeptideScreeningService.screen_uniprot_candidates`（160 行）拆成同一个 class 下的几个私有步骤方法（例如 `_discover_step`/`_rule_score_step`/`_uspnet_merge_step`/`_similarity_step`/`_source_annotation_merge_step`），每个 40-50 行以内，`screen_uniprot_candidates` 本身只负责按顺序调用。
-- [ ] 更新 `services/__init__.py`、`cli.py`、`ui/streamlit_app.py`、`ui/experimental_browser.py` 里对 `cluster_similar_signal_peptides`/`choose_representative`/`signal_peptide_identity` 的 import 来源。
-- [ ] 跑 `python -m pytest -q`（重点看 `tests/test_screening.py`，含 2026-07-28 新加的 `test_refresh_preserves_completed_source_protein_annotations`）。
+- [x] 新建 `services/similarity.py`（115 行）：`cluster_similar_signal_peptides`、`choose_representative`、`signal_peptide_identity`、`_levenshtein_distance`、`_is_similar_but_not_identical`、`SIMILARITY_IDENTITY_THRESHOLD`。
+- [x] 更新 `services/experimental_exploration.py`：改成从 `services/similarity.py` import `signal_peptide_identity`，不再依赖整个 `screening.py`。
+- [x] 把 `SignalPeptideScreeningService.screen_uniprot_candidates`（160 行）拆成同一个 class 下的 6 个私有步骤方法：`_discover_step`（34 行）、`_build_initial_summary`（41 行）、`_empty_screening_result`、`_rule_score_step`、`_uspnet_merge_step`、`_similarity_step`、`_finalize_screening_result`（49 行），`screen_uniprot_candidates` 本身收缩到 **39 行**，只负责按顺序调用。
+- [x] 更新 `services/__init__.py`、`tests/test_screening.py` 里对 `cluster_similar_signal_peptides`/`choose_representative`/`signal_peptide_identity` 的 import 来源。
+- [x] 跑 `python -m pytest -q`（53/53 通过，含 `test_refresh_preserves_completed_source_protein_annotations`）。
 
-风险：中——这是 in-degree 最高的文件（CLI/UI/测试都调），务必先做 Phase 0/3/4 让 `screening.py` 的依赖面先稳定下来，再动它。
+**执行时的关键发现和调整：**
+
+1. **`choose_representative` 有隐藏依赖，计划的清单不完整**：`choose_representative` 内部调用 `_representative_sort_key`，而 `_representative_sort_key` 又调用 `_uspnet_supports_signal_peptide` 和 `_reviewed_or_strong_evidence`——这三个私有辅助函数只被这条链路用到，计划原来的清单没写它们，但必须跟着一起搬，否则 `choose_representative` 会在新文件里找不到依赖。
+2. **计划里提到要改的 `cli.py`、`ui/streamlit_app.py`、`ui/experimental_browser.py` 三个文件，实际都不需要改**：全仓库 grep 确认这三个文件都没有直接 import `cluster_similar_signal_peptides`/`choose_representative`/`signal_peptide_identity`——它们只通过 `SignalPeptideScreeningService`/`services/__init__.py` 间接用到。实际需要改 import 的只有 `services/__init__.py` 和 `services/experimental_exploration.py`（原计划就点名要修的耦合问题），外加 `tests/test_screening.py`（计划没提，但这几个符号确实物理搬家了，跟 Phase 3 的 `score_construct` 一样需要同步改测试文件的 import）。
+3. **god-method 拆分用"可变字典/列表原地更新"而不是每步返回新增量**：`summary` dict 和 `errors` list 在各步骤方法之间以引用传递、原地 `update`/`append`，和原来单一大方法里的写法完全一致，只是分散到几个方法调用里——没有为了"更干净"改成每步返回增量再合并，那样是更大的设计变动，超出"拆分不改行为"的范围。
+4. **`annotate_persisted_source_proteins`（74 行）现在是 `screening.py` 里最长的方法**，但它不在本次 Phase 2 范围内（计划只点名了 `screen_uniprot_candidates`），没有动它——如果以后还要继续瘦身 `screening.py`，这是下一个候选。
+
+风险：中，已验证（in-degree 最高的文件，但外部消费者比计划设想的少，改动范围可控）。
 
 ---
 

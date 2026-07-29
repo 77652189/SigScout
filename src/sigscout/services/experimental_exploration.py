@@ -5,7 +5,7 @@ from collections.abc import Iterable
 import pandas as pd
 
 from sigscout.core.coercion import truthy
-from sigscout.services.screening import signal_peptide_identity
+from sigscout.services.similarity import signal_peptide_identity
 
 
 CHANNEL_POSITIVE = "正向锚点邻域"
