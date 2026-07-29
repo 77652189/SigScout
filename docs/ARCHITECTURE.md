@@ -96,4 +96,8 @@ flowchart TD
 
 ## 8. 测试布局
 
-`tests/` 与 `src/sigscout/services|adapters/` 基本一对一镜像命名（`test_screening.py`、`test_fusion_constructs.py` 等），`conftest.py` 提供共享 fixture。截至本文档编写，53 个测试全部通过。**UI 层（`ui/streamlit_app.py`、`ui/_shared.py`、`ui/views/*.py`、`ui/experimental_browser.py`）没有对应测试文件**——这是唯一的覆盖缺口，Phase 1 拆分后依然如此，只能靠手动启动 `streamlit run` 验证。
+`tests/` 与 `src/sigscout/services|adapters/` 基本一对一镜像命名（`test_screening.py`、`test_fusion_constructs.py` 等），`conftest.py` 提供共享 fixture。截至本文档编写，64 个测试全部通过。
+
+**UI 层基本冒烟测试（`tests/test_ui_smoke.py`，2026-07-29 新增）**：用 Streamlit 自带的 `streamlit.testing.v1.AppTest` 框架（不开浏览器）给 4 个 view 模块的 10 个 `page_*` 函数各配一个测试，断言页面能无异常渲染且确实渲染出内容。**关键写法坑**：`AppTest.from_function` 要求传入的函数“自包含”——它是把函数源码提取出来单独执行，脱离原模块的 import 上下文，所以不能直接把 `page_screening` 这类定义在 view 模块里、内部引用同模块其他名字的函数传进去（会 `NameError`），每个页面都配了一个只做“函数内 import + 调用”的薄包装函数。另有一个 `test_pages_degrade_gracefully_without_local_data` 测试，用 `monkeypatch` 把 `PATHS` 指向空临时目录，验证页面在没有 `local_runs/`/`examples/opn/saved_screening/`（全新 checkout 场景）时也会走已有的优雅降级分支（`st.warning`）而不是抛异常。
+
+这仍然只是“页面级冒烟”，不是全面的 UI 测试——不断言具体展示内容、不模拟按钮点击/表单交互，`pytest -q` 全绿也不能替代手动 Streamlit 走查（改 UI 后仍然要跑一遍浏览器验证，见 [CURRENT_GOALS.md](CURRENT_GOALS.md) 已知的坑）。
