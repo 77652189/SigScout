@@ -28,7 +28,7 @@ class ProjectPaths:
         return self.root / "examples" / "opn" / "saved_screening"
 
     @property
-    def opn_screening_output_dir(self) -> Path:
+    def screening_output_dir(self) -> Path:
         return self.local_runs_dir / "opn_signal_peptides"
 
     @property

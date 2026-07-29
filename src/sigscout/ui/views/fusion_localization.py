@@ -591,8 +591,8 @@ def _localization_cache_path(tool_name: str, target_key: str | None = None) -> P
     safe_tool = "".join(ch for ch in tool_name.lower() if ch.isalnum() or ch in {"_", "-"}).strip("_-")
     safe_target = "".join(ch for ch in (target_key or _current_fusion_target_key()).lower() if ch.isalnum() or ch in {"_", "-"}).strip("_-")
     if safe_target == "opn":
-        return PATHS.opn_screening_output_dir / f"fusion_localization_{safe_tool or 'external'}.csv"
-    return PATHS.opn_screening_output_dir / f"fusion_localization_{safe_target or 'target'}_{safe_tool or 'external'}.csv"
+        return PATHS.screening_output_dir / f"fusion_localization_{safe_tool or 'external'}.csv"
+    return PATHS.screening_output_dir / f"fusion_localization_{safe_target or 'target'}_{safe_tool or 'external'}.csv"
 
 
 def _save_localization_cache(tool_name: str, rows: list[dict[str, object]], target_key: str | None = None) -> None:

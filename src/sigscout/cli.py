@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _pichia_screening_service(paths: ProjectPaths, output_dir: Path | None) -> SignalPeptideScreeningService:
     return SignalPeptideScreeningService(
-        output_dir or paths.opn_screening_output_dir,
+        output_dir or paths.screening_output_dir,
         library_service=SignalPeptideLibraryService(candidate_prefix="PICHIA_UNIPROT"),
         uspnet_adapter=USPNetAdapter(repo_dir=paths.uspnet_repo),
         target_key="pichia_signal_peptide_library",

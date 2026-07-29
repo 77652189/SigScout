@@ -51,7 +51,7 @@ flowchart TD
 
 - `models.py`（71 行）：`SignalPeptideCandidate`（Pydantic，候选的规范表示：leader/signal peptide 序列、来源 UniProt 字段、分类标签）、`CandidateDiscoveryResult`、`UniProtCandidateLibraryResult`、`AA_PATTERN`（标准氨基酸单字母正则）。
 - `inputs.py`（66 行）：`CandidateInputProvider`/`TargetProteinInputProvider` 两个 `Protocol`，`CandidateInputBatch`/`TargetProteinInput(Result)` 数据类，`clean_amino_acid_sequence`/`is_standard_amino_acid_sequence`。新增候选输入来源应该实现这两个 Protocol 之一，而不是让 UI 直接解析。
-- `paths.py`（46 行）：`ProjectPaths.discover()` 向上找 `pyproject.toml` + `src/sigscout` 定位项目根；`local_runs_dir`、`uspnet_repo`（支持 `USPNET_REPO` 环境变量）等路径属性。**命名残留（`opn_saved_screening_dir` 已于 2026-07-29 改名为 `example_saved_screening_dir` 解决，只改属性标识符，返回的实际磁盘路径 `examples/opn/saved_screening` 不变）**：姊妹属性 `opn_screening_output_dir`（`local_runs/opn_signal_peptides`）还带着同样的历史命名残留——同样跟目标蛋白无关，纯粹是毕赤酵母信号肽筛选流程的本地输出目录，但引用点有 5 处（比刚处理的那个多），这次没有一并改名，见 [CURRENT_GOALS.md](CURRENT_GOALS.md) 已知的坑。
+- `paths.py`（46 行）：`ProjectPaths.discover()` 向上找 `pyproject.toml` + `src/sigscout` 定位项目根；`local_runs_dir`、`uspnet_repo`（支持 `USPNET_REPO` 环境变量）等路径属性。**命名残留已全部解决（2026-07-29）**：`opn_saved_screening_dir` 改名为 `example_saved_screening_dir`；姊妹属性 `opn_screening_output_dir`（5 处引用：`cli.py`、`ui/_shared.py`、`ui/views/fusion_localization.py`×2、定义处）也改名为 `screening_output_dir`。两次都只改属性标识符，返回的实际磁盘路径（`examples/opn/saved_screening`、`local_runs/opn_signal_peptides`）完全没变。
 - `coercion.py`（47 行，[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0 新增）：`truthy`/`safe_int`/`safe_int_from_float`/`safe_float`/`now_iso`/`json_dumps`/`list_values`——原本分散在 7 个文件里的重复小工具函数收敛处。`safe_int` 和 `safe_int_from_float` 是两个不同函数（严格/宽松两种数字解析行为），不要当成同一个函数的两种写法。
 
 ## 4. 服务层（`src/sigscout/services/`）—— 主要复杂度集中在这里

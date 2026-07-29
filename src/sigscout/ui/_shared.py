@@ -203,7 +203,7 @@ def _css() -> None:
 
 def _local_screening_service() -> SignalPeptideScreeningService:
     return SignalPeptideScreeningService(
-        PATHS.opn_screening_output_dir,
+        PATHS.screening_output_dir,
         library_service=SignalPeptideLibraryService(candidate_prefix="PICHIA_UNIPROT"),
         uspnet_adapter=USPNetAdapter(repo_dir=PATHS.uspnet_repo),
         target_key="pichia_signal_peptide_library",
