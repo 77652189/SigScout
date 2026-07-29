@@ -25,11 +25,10 @@
 2. **实验反馈闭环是单目标硬编码的**：`opn_measurements.csv` 路径、`target_key="opn"`（现在分散在 `ui/views/experimental_feedback.py`/`ui/views/fusion_localization.py` 里）、`render_opn_experimental_browser`、`fusion_selected_candidate_ids_opn` 这些都还没跟着 `FUSION_TARGET_PRESETS` 多目标化。现在只有一个目标在用，暂时不会炸；一旦要接第二个目标蛋白的湿实验数据，这里必须先改。详见 [ARCHITECTURE.md](ARCHITECTURE.md) 第 4 节。
 3. **UI 层零自动化测试**：`ui/streamlit_app.py`、`ui/_shared.py`、`ui/views/*.py`、`ui/experimental_browser.py` 没有任何 pytest 覆盖，Phase 1 拆分后依然如此。改 UI 之后 `pytest -q` 全绿不代表没坏，必须手动跑一遍 Streamlit 页面。
 4. **`services/__init__.py` 现在是刻意留空的**（Phase 5 已解决，方案 B）：不要从 `sigscout.services` 包级导入任何东西，也不要往 `__init__.py` 里加"精选重导出"——统一直接从具体子模块 import（例如 `from sigscout.services.screening import SignalPeptideScreeningService`）。
-5. **仓库根目录有一个未纳入版本控制的 `external.7z`**：不清楚是什么内容、要不要长期保留在工作目录里。如果确认不需要提交，建议加进 `.gitignore` 或直接清理，避免以后有人误以为它该被提交、或者不知道能不能删。**这个由你决定，我没有主动处理。**
-6. **没有 `.gitattributes`，行尾风格依赖每台机器的 `core.autocrlf` 设置**（本机是 `true`）：这是为什么这次会话里几乎每条涉及文件改动的 git 命令都弹 "LF will be replaced by CRLF" 警告。目前不影响功能，但换一台 `autocrlf=false` 的机器协作时可能出现整份文件的行尾 diff 噪音。如果以后要多人协作，值得补一个 `.gitattributes` 固定 `* text=auto`。
-7. **`core/paths.py` 的 `opn_saved_screening_dir` 属性名残留**：命名没跟上多目标化，见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-06-18 条目。低优先级，顺手改的时候改。
-8. **一个跟 Phase 0 无关的死 import**（执行 Phase 0 时顺带发现）：`services/source_protein_annotation.py` 的 `from typing import Iterable` 目前没有实际用到，低优先级，顺手清理即可。原来 `streamlit_app.py` 里还有一个未使用的 `annotate_candidate_experimental_evidence` 导入，Phase 1 重写 `ui/views/fusion_localization.py` 时核对每个 import 的实际用途后已经顺带没有带过去，不用再处理。
-9. **新建 UI 子目录时不要叫 `pages`**：这个名字被 Streamlit 保留给它自己的多页面应用自动发现机制，撞了会在侧边栏冒出一份多余的导航列表。SigScout 目前用 `ui/views/` 存放页面渲染模块。
+5. **没有 `.gitattributes`，行尾风格依赖每台机器的 `core.autocrlf` 设置**（本机是 `true`）：这是为什么这次会话里几乎每条涉及文件改动的 git 命令都弹 "LF will be replaced by CRLF" 警告。目前不影响功能，但换一台 `autocrlf=false` 的机器协作时可能出现整份文件的行尾 diff 噪音。如果以后要多人协作，值得补一个 `.gitattributes` 固定 `* text=auto`。
+6. **`core/paths.py` 的 `opn_saved_screening_dir` 属性名残留**：命名没跟上多目标化，见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-06-18 条目。低优先级，顺手改的时候改。
+7. **一个跟 Phase 0 无关的死 import**（执行 Phase 0 时顺带发现）：`services/source_protein_annotation.py` 的 `from typing import Iterable` 目前没有实际用到，低优先级，顺手清理即可。原来 `streamlit_app.py` 里还有一个未使用的 `annotate_candidate_experimental_evidence` 导入，Phase 1 重写 `ui/views/fusion_localization.py` 时核对每个 import 的实际用途后已经顺带没有带过去，不用再处理。
+8. **新建 UI 子目录时不要叫 `pages`**：这个名字被 Streamlit 保留给它自己的多页面应用自动发现机制，撞了会在侧边栏冒出一份多余的导航列表。SigScout 目前用 `ui/views/` 存放页面渲染模块。
 
 ## 文档地图
 
