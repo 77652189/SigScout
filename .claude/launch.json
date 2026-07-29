@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sigscout-streamlit",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "streamlit",
+        "run",
+        "src/sigscout/ui/streamlit_app.py",
+        "--server.address",
+        "0.0.0.0",
+        "--server.headless",
+        "true"
+      ],
+      "port": 8506,
+      "autoPort": true
+    }
+  ]
+}

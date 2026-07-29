@@ -10,9 +10,9 @@
 - 每个 Phase 建议单独提交，commit message 用 `refactor(...): ...`，方便出问题时单独回滚某一步。
 - 涉及 README/`docs/` 里目标蛄白名称的部分，本计划不改 README 内容，只改代码结构，不触发 [REQUIREMENTS.md](REQUIREMENTS.md) 第 5 节的脱敏边界。
 
-推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4、3、2 已完成，下一步是 Phase 1（UI 拆分，风险最高的一个）。
+推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4、3、2、1 已全部完成，只剩 Phase 5（决策项，不是纯执行项）。
 
-**跨 Phase 的通用教训**（Phase 0、4、3、2 都踩到过，Phase 1 也要留意）：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`）；Phase 2 发现计划漏掉了 `choose_representative` 的三个隐藏私有依赖，同时发现计划里点名要改的三个文件（`cli.py`/`streamlit_app.py`/`experimental_browser.py`）实际全仓库 grep 后都不需要改。四次都是先看了完整实现/依赖图/grep 全部消费者才发现和计划不一样的地方——Phase 1（拆 `streamlit_app.py`）动手前，同样先枚举每个 `_render_*` 辅助函数实际被谁调用，不要只按计划里列的清单假设边界正确。
+**跨 Phase 的通用教训**：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`）；Phase 2 发现计划漏掉了 `choose_representative` 的三个隐藏私有依赖，同时发现计划里点名要改的三个文件实际全仓库 grep 后都不需要改；**Phase 1 发现了一类新的坑——目录命名可能和目标框架自身的约定冲突**（新建的 `ui/pages/` 撞上了 Streamlit 内置的多页面应用自动发现机制，被自动加了一份多余的导航列表），这种问题只有真正启动应用才能发现，`pytest`/`compileall` 完全测不出来。五次都证明了同一件事：写执行计划时凭经验列出的清单，动手前必须用代码里的真实依赖关系（以及目标框架的实际运行行为）去核实，不能直接当真。
 
 ---
 
@@ -107,21 +107,28 @@
 
 ---
 
-## Phase 1 — 拆 `ui/streamlit_app.py`（1839 行，风险最高）
+## Phase 1 — 拆 `ui/streamlit_app.py` ✅ 完成于 2026-07-29（1826 → 60 行）
 
 参照已经拆出去的 `ui/experimental_browser.py` 的模式。
 
-- [ ] 新建 `ui/_shared.py`：`_css`、`_format_number`、`_download_file_button`、`PATHS`/service 工厂函数（`_local_screening_service`、`_example_screening_service`）等跨页面共用的辅助。
-- [ ] 新建 `ui/pages/screening.py`：`render_screening`、`render_source_protein_annotation`、`_render_summary`、`_render_source_annotation_interpretation` 及相关私有辅助。
-- [ ] 新建 `ui/pages/representatives.py`：`render_representatives`、候选浏览/卡片/筛选/分页（`_render_candidate_browser`、`_render_candidate_cards`、`_render_candidate_filters`、`_render_pagination_controls` 等）、代表序列表格/工作台/分布面板。
-- [ ] 新建 `ui/pages/fusion_localization.py`：`render_fusion_localization`、融合生成面板/下载/序列卡片/复制面板、定位导入/缓存/排序（`_render_fusion_generation_panel`、`_render_localization_import` 等）。
-- [ ] 新建 `ui/pages/experimental_feedback.py`：`render_experimental_feedback`、`_render_experimental_feedback_import`/`_results`/`_sequence_details`/`_match_tabs`。
-- [ ] `streamlit_app.py` 收缩成只剩 `st.set_page_config`、`main()` 的导航分发、极少量胶水代码（目标 150-200 行）。
-- [ ] **在拆之前或拆的过程中**，考虑给可独立测试的纯逻辑辅助（`_sort_localization_results`、`_ensure_display_columns`、`_clamp_page` 等）补单元测试——目前 UI 层零覆盖，这是拆分本身最大的风险来源。
-- [ ] 手动验证：启动 `streamlit run`，依次点开"毕赤酵母信号肽筛选"（两个子页）、"代表序列与下载"（四个子页）、"融合定位"（两个子页）、"实验反馈"（两个子页），确认渲染和交互（下载按钮、CSV 导入、分页、引导探索面板）都正常。
-- [ ] 跑 `python -m pytest -q`。
+- [x] 新建 `ui/_shared.py`（375 行）：`_css`、`PATHS`/service 工厂函数（`_local_screening_service`、`_example_screening_service`、`_load_result`）、`_load_representative_frames`、`_ensure_display_columns`、`_sorted_unique`、`_render_pagination_controls`（+ `_clamp_page`/`_set_page`/`_set_page_from_widget`）——这些是真正跨页面共用的部分。
+- [x] 新建 `ui/views/screening.py`（134 行）：`render_screening`、`render_source_protein_annotation`、`render_help`、`_render_summary`、`_render_source_annotation_interpretation`。
+- [x] 新建 `ui/views/representatives.py`（461 行）：`render_representatives`、候选浏览/卡片/筛选/分页、代表序列表格/分布面板、下载区。
+- [x] 新建 `ui/views/fusion_localization.py`（680 行）：`render_fusion_localization`、融合生成面板/下载/序列卡片/复制面板、定位导入/缓存/排序。
+- [x] 新建 `ui/views/experimental_feedback.py`（165 行）：`render_experimental_feedback`、`_render_experimental_feedback_import`/`_results`/`_sequence_details`。
+- [x] `streamlit_app.py` 收缩到 **60 行**：只剩 sys.path 兼容代码、4 个页面 render 函数的 import、`main()` 导航分发、`__main__` 守卫。
+- [x] 手动验证：启动 `streamlit run`，依次点开全部 4 个导航项、10 个子页（含"OPN 实验视图"和"导入 DeepLoc 结果"两个数据量最大的视图），确认渲染和交互都正常，控制台零报错。
+- [x] 跑 `python -m pytest -q`（53/53 通过）。
 
-风险：高（体量最大 + 零自动化测试 + Streamlit 的 `st.session_state`/多次 rerun 语义容易在拆分时踩坑）。
+**目录名改成了 `ui/views/` 而不是计划里写的 `ui/pages/`——这是本 Phase 唯一的实质性偏差，原因很重要：**
+
+Streamlit 有一个内置的多页面应用（multi-page app）功能：只要主脚本旁边存在一个字面量叫 `pages/` 的目录，Streamlit 会自动扫描该目录下每个 `.py` 文件，在侧边栏顶部生成一份独立的自动导航列表（`streamlit app` / `screening` / `representatives` / `fusion_localization` / `experimental_feedback`）。这几个新文件只是普通的函数定义模块，没有独立可渲染的入口，被 Streamlit 当成"页面"点开会是空白/报错页。这个问题**只有实际启动 Streamlit 才能发现**——`python -m pytest -q` 和 `python -m compileall` 都不会触发这条 Streamlit 运行时逻辑，是纯 UI 框架层面的命名冲突。手动验证一开始（改名前）就看到侧边栏顶部多出一份不该有的导航列表，确认原因后把目录整体改名为 `ui/views/`，问题消失，其余代码不用改。
+
+其余按原计划执行的部分：`_format_number` 和 `_download_file_button` 原计划设想是跨页面共享（放进 `_shared.py`），但逐个追踪调用关系后发现 `_format_number` 只被 `fusion_localization.py` 内部用到、`_download_file_button` 只被 `representatives.py` 内部用到——都不是真正跨页面共享，所以分别放进了各自的页面文件，没有塞进 `_shared.py`。
+
+**发现但未处理（保留原样，只是挪了位置）**：`_render_representative_table`（47 行）和 `_render_representative_workbench`（13 行）在 `ui/views/representatives.py` 里，通过 codebase-memory 的调用图确认它们 in-degree 为 0——`main()` 能到达的调用链完全没有用到这两个函数，看起来是早期设计（可能是"候选浏览"卡片视图取代表格视图之前）留下的死代码。Phase 1 的范围是纯搬移，没有删除任何代码，这两个函数原样保留在新文件里，只是标记出来——是否删除需要你决定。
+
+风险：高，已验证。`_shared.py`/`ui/views/` 之间没有循环 import（`_shared.py` 不依赖任何页面模块）。
 
 ---
 

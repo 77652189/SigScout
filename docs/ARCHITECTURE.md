@@ -1,6 +1,6 @@
 # SigScout 架构文档
 
-维护说明：这份文档描述**当前代码的实际结构**（截至 2026-07-28，commit `a4f68a3`），不是理想状态。理想状态与差距见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)；变更历史见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md)。行数/依赖数据来自 codebase-memory-mcp 图索引，若代码已变化，以实际代码为准。
+维护说明：这份文档描述**当前代码的实际结构**（截至 2026-07-29，Phase 0/4/3/2/1 均已完成，只剩 Phase 5 待决策），不是理想状态。理想状态与差距见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)；变更历史见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md)。行数/依赖数据来自 codebase-memory-mcp 图索引和实际代码核对，若代码已变化，以实际代码为准。
 
 ## 1. 分层总览
 
@@ -20,13 +20,28 @@ flowchart TD
     SERVICES --> DATA
 ```
 
-**当前实际耦合比 README 画的更乱**：`UI --> SERVICES` 这条箭头在代码里是"`streamlit_app.py` 直接 `import` 5 个 service 子模块 + 1 个 adapter + `core.paths`"，绕过了 `services/__init__.py` 想要充当的统一入口——`services/__init__.py` 的 `__all__` 本身也没跟上实际用法（缺 `score_construct`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、`DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE`、experimental_feedback 的导出等）。这条不一致在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5 里作为未决问题记录，还没有解决。
+**服务层内部耦合**：`services/__init__.py` 的 `__all__` 和实际用法脱节——它缺 `score_construct`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、`DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE`、experimental_feedback 的导出等，UI 层（Phase 1 之后也一样）一直是直接 `from sigscout.services.xxx import yyy` 绕过它。这条不一致在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5 里作为未决问题记录，还没有解决——需要用户决定是把 `__init__.py` 修成唯一入口，还是干脆放弃这层封装。
 
 ## 2. 入口层
 
 - **CLI**（`src/sigscout/cli.py`，109 行）：`argparse` 四个子命令 `discover`/`screen`/`annotate-source`/`serve`；只依赖 `SignalPeptideLibraryService`、`SignalPeptideScreeningService`、`USPNetAdapter`——没有直接依赖 fusion/experimental 相关模块，是全代码库里耦合最干净的入口。
-- **Streamlit UI**（`src/sigscout/ui/streamlit_app.py`，**1839 行，64 个函数，无 class**）：`main()` 用侧边栏 `radio` 做四路导航——"毕赤酵母信号肽筛选" / "代表序列与下载" / "融合定位" / "实验反馈"——分发给四个 `render_*` 顶层函数，每个顶层函数下面挂了一堆 `_render_*` 私有辅助（表格、卡片、分页、CSS、下载按钮等）。**这是全代码库最大的单文件，也是零自动化测试覆盖的部分**——现有 53 个测试没有一个 import `streamlit_app.py` 或 `experimental_browser.py`。
-- **`ui/experimental_browser.py`**（322 行）：`render_opn_experimental_browser` 及其私有辅助，从 `streamlit_app.py` 的 `_render_candidate_browser` 里被调用，嵌入"代表序列与下载 → 候选浏览"页面，不是独立导航项。这个文件是目前 UI 层里**唯一**做到"从 `streamlit_app.py` 拆出去独立成文件"的例子，是 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 1 拆分的参照样板。
+- **Streamlit UI**（`src/sigscout/ui/`，[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 1 完成，`streamlit_app.py` 从 1839 行降到 **60 行**）：见下方"UI 层文件表"。
+
+### UI 层文件表（Phase 1 完成后）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `streamlit_app.py` | 60 | sys.path 兼容代码（`streamlit run` 直接执行脚本时让 `sigscout` 包可导入）、`main()`（侧边栏四路导航分发）、`__main__` 守卫。不再包含任何页面渲染逻辑 |
+| `_shared.py` | 375 | 跨页面共用：`PATHS`（`ProjectPaths.discover` 结果）、`st.set_page_config`（模块加载时执行一次）、`_css`、`_local_screening_service`/`_example_screening_service`/`_load_result`/`_load_representative_frames`、`_ensure_display_columns`、`_sorted_unique`、`_render_pagination_controls`（+ `_clamp_page`/`_set_page`/`_set_page_from_widget`） |
+| `views/screening.py` | 134 | "毕赤酵母信号肽筛选"：`render_screening`、`render_source_protein_annotation`、`render_help`、结果摘要渲染 |
+| `views/representatives.py` | 461 | "代表序列与下载"：候选浏览（含 OPN 实验视图切换）/证据分布/相似序列/原始数据四个子页、下载按钮。含两个疑似死代码函数，见下方说明 |
+| `views/fusion_localization.py` | 680 | "融合定位"：构建生成面板、DeepLoc/BUSCA 导入、定位缓存、融合序列复制区——UI 层里最大的文件，因为它同时承接 `fusion_constructs`/`fusion_scoring`/`localization_import`/`experimental_evidence` 四个 service 模块的展示逻辑 |
+| `views/experimental_feedback.py` | 165 | "实验反馈"：OPN 实验结果展示、CSV 导入与模板 |
+| `experimental_browser.py` | 322 | 不属于本次拆分范围（Phase 1 之前就已独立成文件），嵌入 `views/representatives.py` 的"候选浏览"页面，不是独立导航项 |
+
+**命名坑，记录下来避免以后重蹈**：新目录本来想按计划叫 `ui/pages/`，实际建出来后 Streamlit 会把它当成自己的[多页面应用](https://docs.streamlit.io/develop/concepts/multipage-apps)功能目录，自动在侧边栏顶部加一份基于文件名生成的导航列表（这些文件本身不是可独立运行的页面，点开是空白页）。这个问题只有真正 `streamlit run` 起来才会暴露，`pytest`/`compileall` 都测不出来。已改名为 `ui/views/`，问题解决——以后新增 UI 子目录时不要用 `pages` 这个名字。
+
+**已知死代码**：`views/representatives.py` 里的 `_render_representative_table`（47 行）和 `_render_representative_workbench`（13 行），通过调用图确认 in-degree 为 0，`main()` 的可达调用链完全没用到，大概率是早期设计（表格视图/tabs 布局）被"候选浏览"卡片视图取代后留下的。Phase 1 只做纯搬移没有删代码，这两个函数原样保留在新文件里，是否删除需要用户决定。
 
 ## 3. 核心模型层（`src/sigscout/core/`）
 
@@ -57,7 +72,7 @@ flowchart TD
 | `experimental_exploration.py` | 226 | `build_experiment_guided_exploration`：用已测数据的正/中/低表现锚点，通过 Levenshtein 序列相似度给未测候选打分，四通道配额选面板（正向邻域/通用预测强/多样性/低表现对照） | 曾经仅为借用 `signal_peptide_identity` 就 `import` 整个 `screening.py`；Phase 2 已修复，现在依赖 `similarity.py` |
 | `__init__.py` | 49 | 精选重导出（见第 1 节的不一致说明） | |
 
-**已知命名残留**：实验反馈闭环目前的路径/键名是**单目标硬编码**的——`streamlit_app.py` 里读取的固定路径是 `local_runs/experimental_feedback/opn_measurements.csv`，`target_key="opn"` 是字面量；`ui/experimental_browser.py` 的函数名是 `render_opn_experimental_browser`，session key 是 `fusion_selected_candidate_ids_opn`。而同一次推送刚把 `fusion_constructs.py` 从单目标改成了 `FUSION_TARGET_PRESETS` 多目标注册表。也就是说：**融合构建已经多目标化，但实验反馈闭环还没有跟上**——如果以后要给第二个目标蛋白接入湿实验数据，这些硬编码路径/键名会先炸。这是一个具体的"坑"，记录在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 里跟踪。
+**已知命名残留**：实验反馈闭环目前的路径/键名是**单目标硬编码**的——`ui/views/experimental_feedback.py`/`ui/views/fusion_localization.py` 里读取的固定路径是 `local_runs/experimental_feedback/opn_measurements.csv`，`target_key="opn"` 是字面量；`ui/experimental_browser.py` 的函数名是 `render_opn_experimental_browser`，session key 是 `fusion_selected_candidate_ids_opn`。而同一次推送刚把 `fusion_constructs.py` 从单目标改成了 `FUSION_TARGET_PRESETS` 多目标注册表。也就是说：**融合构建已经多目标化，但实验反馈闭环还没有跟上**——如果以后要给第二个目标蛋白接入湿实验数据，这些硬编码路径/键名会先炸。这是一个具体的"坑"，记录在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 里跟踪。
 
 ## 5. 适配层（`src/sigscout/adapters/`）
 
@@ -79,4 +94,4 @@ flowchart TD
 
 ## 8. 测试布局
 
-`tests/` 与 `src/sigscout/services|adapters/` 基本一对一镜像命名（`test_screening.py`、`test_fusion_constructs.py` 等），`conftest.py` 提供共享 fixture。截至本文档编写，53 个测试全部通过。**UI 层没有对应测试文件**——这是唯一的覆盖缺口。
+`tests/` 与 `src/sigscout/services|adapters/` 基本一对一镜像命名（`test_screening.py`、`test_fusion_constructs.py` 等），`conftest.py` 提供共享 fixture。截至本文档编写，53 个测试全部通过。**UI 层（`ui/streamlit_app.py`、`ui/_shared.py`、`ui/views/*.py`、`ui/experimental_browser.py`）没有对应测试文件**——这是唯一的覆盖缺口，Phase 1 拆分后依然如此，只能靠手动启动 `streamlit run` 验证。

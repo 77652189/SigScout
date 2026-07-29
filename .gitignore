@@ -24,3 +24,4 @@ examples/opn/saved_screening/
 *.bak
 *.csv.tmp
 uspnet_raw/
+.claude/settings.local.json
