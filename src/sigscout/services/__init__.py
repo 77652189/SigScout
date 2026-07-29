@@ -15,8 +15,8 @@ from sigscout.services.fusion_constructs import (
     build_fusion_constructs,
     fusion_constructs_to_csv,
     fusion_constructs_to_fasta,
-    import_localization_results,
 )
+from sigscout.services.localization_import import import_localization_results
 from sigscout.services.rules import score_signal_peptide
 from sigscout.services.screening import (
     SignalPeptideScreeningResult,

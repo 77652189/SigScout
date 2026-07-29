@@ -22,10 +22,9 @@ from sigscout.services.fusion_constructs import (  # noqa: E402
     build_fusion_constructs,
     fusion_constructs_to_csv,
     fusion_constructs_to_fasta,
-    import_localization_results,
-    score_construct,
-    summarize_localization,
 )
+from sigscout.services.fusion_scoring import score_construct, summarize_localization  # noqa: E402
+from sigscout.services.localization_import import import_localization_results  # noqa: E402
 from sigscout.services.experimental_evidence import (  # noqa: E402
     annotate_candidate_experimental_evidence,
     annotate_construct_experimental_evidence,

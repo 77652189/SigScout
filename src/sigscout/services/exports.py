@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
 from typing import Iterable
@@ -8,11 +9,23 @@ from typing import Iterable
 
 def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = _fieldnames(rows)
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+        handle.write(_csv_body(rows, lineterminator="\r\n"))
+
+
+def rows_to_csv(rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return ""
+    return _csv_body(rows, lineterminator="\n")
+
+
+def _csv_body(rows: list[dict[str, object]], *, lineterminator: str) -> str:
+    output = io.StringIO()
+    fieldnames = _fieldnames(rows)
+    writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator=lineterminator)
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue()
 
 
 def write_candidate_fasta(path: Path, rows: Iterable[dict[str, object]]) -> None:
@@ -37,12 +50,16 @@ def write_signal_peptide_fasta(path: Path, rows: Iterable[dict[str, object]]) ->
 
 def write_fasta(path: Path, records: Iterable[tuple[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(records_to_fasta(records), encoding="utf-8")
+
+
+def records_to_fasta(records: Iterable[tuple[str, str]]) -> str:
     lines: list[str] = []
     for header, sequence in records:
         lines.append(f">{header}")
         for index in range(0, len(sequence), 80):
             lines.append(sequence[index : index + 80])
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def write_json(path: Path, payload: dict[str, object]) -> None:

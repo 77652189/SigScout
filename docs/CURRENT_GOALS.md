@@ -7,14 +7,15 @@
 - 湿实验反馈闭环功能已合并并推送到 `origin/master`（`c8e2d3b`），README 双语已补充说明（`a4f68a3`），需求/架构/架构变更/执行计划/当前目标 5 份工程文档已建立并推送（`02e3756`）。
 - **[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0（去重共享工具函数）已完成**：新增 `src/sigscout/core/coercion.py`，7 个文件里的重复 `_safe_int`/`_safe_float`/`_truthy`/`_now_iso`/`_json_dumps`/`_coerce_bool`/`_safe_int_value` 全部收敛。执行时发现 `_safe_int` 实际混用了两种不兼容行为（严格版/宽松版），拆成了 `safe_int`/`safe_int_from_float` 两个函数，没有强行合一——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0。
 - **Phase 4（拆 `source_protein_annotation.py`）已完成**：455 → 313 行，新增 `services/evidence_classification.py`（148 行）。执行时发现按原计划拆会形成循环 import，改成了单向依赖并把 `ROUTE_UNKNOWN` 挪去了新文件、把 `_list_values` 挪去了 `core/coercion.py`（改名 `list_values`）——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 4。
-- 两个 Phase 期间 `python -m pytest -q` 全程 53/53 通过。Phase 3/2/1/5 尚未开始。
+- **Phase 3（拆 `fusion_constructs.py`）已完成**：635 → 250 行，新增 `services/fusion_scoring.py`（248 行，打分逻辑）和 `services/localization_import.py`（137 行，DeepLoc/BUSCA 导入）。执行时发现"留在原文件的 `_construct_row`"反过来调用"要搬走的 `score_construct`"，`import_localization_results` 也调用它——确认 `fusion_scoring.py` 不需要另外两个文件的任何东西后，把它做成了单向依赖的叶子模块。`fusion_constructs_to_csv`/`_to_fasta` 两个公开函数没有物理搬家（避免逼三处调用方都改 import），只是内部改成调用 `exports.py` 新增的 `rows_to_csv`/`records_to_fasta`；两者的 CSV 换行符本来就不一样（`\r\n` vs `\n`），合并时用脚本核对字节级输出确认没有改变——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 3。
+- 三个 Phase 期间 `python -m pytest -q` 全程 53/53 通过。Phase 2/1/5 尚未开始。
 
 ## 下一步（等待决定，不要自己默认选一个就动手）
 
-1. **要不要继续执行 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)？** 按推荐顺序下一步是 Phase 3（拆 `fusion_constructs.py`，风险中）。
-2. **Phase 5 的开放决策**（`services/__init__.py` 到底该不该是唯一导入入口，方案 A/B）需要先定方向，否则 Phase 1-3 拆完之后 import 路径可能要再改一遍。
+1. **要不要继续执行 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)？** 按推荐顺序下一步是 Phase 2（拆 `screening.py`，最大目标，风险中）。
+2. **Phase 5 的开放决策**（`services/__init__.py` 到底该不该是唯一导入入口，方案 A/B）需要先定方向，否则 Phase 1-2 拆完之后 import 路径可能要再改一遍。
 3. 如果暂时不做拆分，继续功能开发时，至少留意下面"已知的坑"里的第 1、4 条。
-4. **新教训**：Phase 0 和 Phase 4 都发生过"计划写的时候没读全函数体/没检查依赖方向，执行时才发现问题"——继续执行 Phase 3/2/1 之前，先确认要移动的函数之间有没有互相依赖，避免重蹈 Phase 4 的循环 import。
+4. **持续验证的教训**：Phase 0、4、3 都发生过"计划写的时候没读全函数体/没检查依赖方向，执行时才发现问题"——执行 Phase 2 之前，先确认 `screen_uniprot_candidates` 内部拆出来的几个步骤方法之间、以及和相似聚类三件套之间，有没有互相依赖，避免重蹈 Phase 3/4 的坑。Phase 2 是 in-degree 最高的文件（CLI/UI/测试都调），格外要小心。
 
 ## 已知的坑（写代码/改文档前先看一眼）
 

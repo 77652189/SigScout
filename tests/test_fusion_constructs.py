@@ -8,10 +8,9 @@ from sigscout.services.fusion_constructs import (
     FUSION_TARGET_PRESETS,
     build_fusion_constructs,
     fusion_constructs_to_fasta,
-    import_localization_results,
-    score_construct,
-    summarize_localization,
 )
+from sigscout.services.fusion_scoring import score_construct, summarize_localization
+from sigscout.services.localization_import import import_localization_results
 
 
 def test_build_fusion_constructs_exports_ac_and_abc() -> None:

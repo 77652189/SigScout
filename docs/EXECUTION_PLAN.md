@@ -10,9 +10,9 @@
 - 每个 Phase 建议单独提交，commit message 用 `refactor(...): ...`，方便出问题时单独回滚某一步。
 - 涉及 README/`docs/` 里目标蛄白名称的部分，本计划不改 README 内容，只改代码结构，不触发 [REQUIREMENTS.md](REQUIREMENTS.md) 第 5 节的脱敏边界。
 
-推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4 已完成，下一步是 Phase 3。
+推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4、3 已完成，下一步是 Phase 2。
 
-**跨 Phase 的通用教训**（Phase 0 和 Phase 4 都踩到过，后面的 Phase 也要留意）：不要只按函数名去重/拆分，先读完整函数体再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import。两次都是先看了完整实现才发现问题，不是一开始就预料到的。
+**跨 Phase 的通用教训**（Phase 0、4、3 都踩到过，后面的 Phase 也要留意）：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`），必须先确认依赖方向再决定谁放哪个文件。三次都是先看了完整实现/依赖图才发现问题，不是一开始就预料到的——Phase 2（拆 `screening.py`）动手前先做同样的依赖排查。
 
 ---
 
@@ -68,16 +68,23 @@
 
 ---
 
-## Phase 3 — 拆 `services/fusion_constructs.py`（652 行）
+## Phase 3 — 拆 `services/fusion_constructs.py` ✅ 完成于 2026-07-28（635 → 250 行）
 
-- [ ] 新建 `services/fusion_scoring.py`，移入：`score_construct`、`summarize_localization`、`DEEPLOC_THRESHOLDS`，以及所有 `_*_score` 辅助（`_signal_detail_score`、`_source_context_score`、`_processing_score`、`_risk_score`、`_localization_probability_score`、`_fine_priority_score`）。
-- [ ] 新建 `services/localization_import.py`，移入：`import_localization_results`、`_read_delimited_table`、`_extract_first`、`_find_construct_key`、`_localization_id_candidates`、`_normalize_id`、`_safe_column_name`、`LOCALIZATION_*_COLUMNS` 常量、`LocalizationImportResult`。
-- [ ] 保留在原文件：`build_fusion_constructs`、`_construct_row`、`clean_protein_sequence`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、`DEFAULT_*_SEQUENCE` 常量、`_sequence_risks`、`_processing_notes`。
-- [ ] 把 `fusion_constructs_to_csv`/`_to_fasta` 合并进 `services/exports.py`（给 `write_csv`/`write_fasta` 增加"返回字符串"而不是"写文件"的变体，两边共用同一份 StringIO+DictWriter 逻辑），删除重复实现。
-- [ ] 更新 `streamlit_app.py`、`services/__init__.py` 的 import。
-- [ ] 跑 `python -m pytest -q`（重点看 `tests/test_fusion_constructs.py`）。
+- [x] 新建 `services/fusion_scoring.py`（248 行）：`score_construct`、`summarize_localization`、`DEEPLOC_THRESHOLDS`，以及所有 `_*_score` 辅助（`_signal_detail_score`、`_source_context_score`、`_processing_score`、`_risk_score`、`_localization_probability_score`、`_fine_priority_score`、`_contains_any`）。
+- [x] 新建 `services/localization_import.py`（137 行）：`import_localization_results`、`_read_delimited_table`、`_extract_first`、`_find_construct_key`、`_localization_id_candidates`、`_normalize_id`、`_safe_column_name`、`LOCALIZATION_*_COLUMNS` 常量、`LocalizationImportResult`。
+- [x] 保留在原文件：`build_fusion_constructs`、`_construct_row`、`clean_protein_sequence`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、`DEFAULT_*_SEQUENCE` 常量、`_sequence_risks`、`_processing_notes`。
+- [x] `fusion_constructs_to_csv`/`_to_fasta` 的 StringIO+DictWriter/80 字符换行逻辑合并进 `services/exports.py`（新增 `rows_to_csv`/`records_to_fasta`，`write_csv`/`write_fasta` 也改为调用它们）；`fusion_constructs.py` 里保留两个同名薄封装函数不变，只是内部转调 `exports.py`。
+- [x] 更新 `streamlit_app.py`、`services/__init__.py`、`tests/test_fusion_constructs.py` 的 import。
+- [x] 跑 `python -m pytest -q`（53/53 通过）。
 
-风险：中（`score_construct`/`summarize_localization` 被 `streamlit_app.py` 和测试同时调用，主要是移动+改 import，逻辑不变）。
+**执行时的关键发现和调整：**
+
+1. **两处计划没写到的跨函数依赖**（先读全部函数体、画依赖图才发现的，教训同 Phase 4）：`_construct_row`（留在原文件）内部调用 `score_construct`（要搬走），`import_localization_results`（搬去 `localization_import.py`）内部也调用 `score_construct`（搬去 `fusion_scoring.py`）来对合并定位数据后的构建重新打分。这意味着依赖方向必须是：`fusion_constructs.py → fusion_scoring.py` 和 `localization_import.py → fusion_scoring.py`，`fusion_scoring.py` 本身不能反过来依赖另外两个文件——验证后确认 `fusion_scoring.py` 确实不需要 `fusion_constructs.py`/`localization_import.py` 的任何东西，所以是单向、不循环。
+2. **CSV/FASTA 合并没有改变对外暴露的名字**：`tests/test_fusion_constructs.py` 只 import 了 `fusion_constructs_to_fasta`（没有 `_to_csv`），`services/__init__.py`/`streamlit_app.py` 两个都 import 了两者。为了不逼着这几个调用方跟着改 import 路径，`fusion_constructs_to_csv`/`fusion_constructs_to_fasta` 两个公开函数**继续留在 `fusion_constructs.py`**，只是函数体改成调用 `exports.py` 新增的 `rows_to_csv`/`records_to_fasta`——"合并进 exports.py" 指的是消灭重复实现的算法本体，不是强制搬迁公开入口。
+3. **CSV 换行符不是同一个行为，逐字节验证过**：原来的 `write_csv`（写文件）没有显式设置 `lineterminator`，走 `csv` 模块默认值 `\r\n`；原来的 `fusion_constructs_to_csv`（返回字符串）显式设了 `lineterminator="\n"`。新的共享核心 `_csv_body(rows, *, lineterminator)` 把这个差异做成参数，`write_csv` 传 `"\r\n"`、`rows_to_csv` 传 `"\n"`——用脚本实际读了两边输出的原始字节确认过完全一致（含 `write_csv` 对空 `rows` 时仍然写一行只有 BOM+换行的"空表头"，`rows_to_csv([])` 则直接返回空字符串，这两者行为本来就不同，都保留了原样）。
+4. `score_construct`/`summarize_localization` 是真正物理搬家（不是留壳），所以 `tests/test_fusion_constructs.py`、`streamlit_app.py`、`services/__init__.py` 三处的 import 语句都要相应拆开成从 `fusion_scoring.py`/`localization_import.py` 分别导入，这点在计划里已经预期到了。
+
+风险：中，已验证（`score_construct`/`summarize_localization` 被三处调用，主要是移动+改 import，逻辑不变；CSV/FASTA 字节级行为经脚本核实无变化）。
 
 ---
 
