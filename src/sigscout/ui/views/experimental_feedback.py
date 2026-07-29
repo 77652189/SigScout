@@ -15,7 +15,15 @@ from sigscout.services.experimental_feedback import (
 from sigscout.ui._shared import PATHS
 
 
-def render_experimental_feedback(subpage: str = "OPN 实验结果") -> None:
+def page_experimental_results() -> None:
+    render_experimental_feedback("实验结果")
+
+
+def page_experimental_import() -> None:
+    render_experimental_feedback("导入与模板")
+
+
+def render_experimental_feedback(subpage: str = "实验结果") -> None:
     st.subheader("实验反馈")
     st.info("当前实验反馈仅来自 OPN（骨桥蛋白）实验，不会自动外推到 hLF，也不会改写通用信号肽候选分数。")
     path = PATHS.local_runs_dir / "experimental_feedback" / "opn_measurements.csv"

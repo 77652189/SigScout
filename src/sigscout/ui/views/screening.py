@@ -9,9 +9,38 @@ from sigscout.ui._shared import _load_result, _local_screening_service
 DEFAULT_TAXON_ID = 4922
 
 
+def page_screening() -> None:
+    render_screening("刷新并筛选毕赤酵母信号肽")
+
+
+def page_source_annotation() -> None:
+    render_screening("评估来源蛋白定位")
+
+
+def _render_onboarding_banner() -> None:
+    if st.session_state.get("onboarding_dismissed", False):
+        return
+    with st.expander("第一次用 SigScout？先看这个", expanded=True):
+        st.markdown(
+            """
+            SigScout 是一条四步流水线，按顺序使用：
+            1. **毕赤酵母信号肽筛选**（当前页）—— 从 UniProt 拉取候选信号肽，跑规则打分和 USPNet 复核。
+            2. **代表序列与下载** —— 浏览、筛选、下载第一步产出的代表序列。
+            3. **融合定位** —— 用代表序列生成 AC/ABC 融合构建，导入 DeepLoc/BUSCA 定位结果。
+            4. **实验反馈** —— 导入湿实验测量结果，反过来指导下一轮候选选择。
+
+            四个阶段对应侧边栏的四个分组，按顺序点开就行。
+            """
+        )
+        if st.button("知道了，不再提示", key="dismiss_onboarding"):
+            st.session_state["onboarding_dismissed"] = True
+            st.rerun()
+
+
 def render_screening(subpage: str = "刷新并筛选毕赤酵母信号肽") -> None:
     st.subheader("毕赤酵母信号肽筛选")
     if subpage == "刷新并筛选毕赤酵母信号肽":
+        _render_onboarding_banner()
         st.write("从 UniProt 刷新毕赤酵母/Komagataella 中带 signal peptide 注释的候选，并运行规则与 USPNet 信号肽筛选。")
         with st.form("screening_form"):
             taxon_id = st.number_input(

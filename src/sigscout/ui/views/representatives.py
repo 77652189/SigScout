@@ -18,6 +18,22 @@ from sigscout.ui._shared import (
 from sigscout.ui.experimental_browser import render_opn_experimental_browser
 
 
+def page_candidate_browser() -> None:
+    render_representatives("候选浏览")
+
+
+def page_evidence_distribution() -> None:
+    render_representatives("证据分布")
+
+
+def page_similar_sequences() -> None:
+    render_representatives("相似序列")
+
+
+def page_raw_data() -> None:
+    render_representatives("原始数据")
+
+
 def render_representatives(subpage: str = "候选浏览") -> None:
     st.subheader("代表序列与下载")
     loaded = _load_representative_frames()

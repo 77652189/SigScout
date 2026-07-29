@@ -24,6 +24,14 @@ from sigscout.services.localization_import import import_localization_results
 from sigscout.ui._shared import PATHS, _load_representative_frames, _render_pagination_controls, _sorted_unique
 
 
+def page_generate_constructs() -> None:
+    render_fusion_localization("生成定位评估文件")
+
+
+def page_import_localization() -> None:
+    render_fusion_localization("导入 DeepLoc 结果")
+
+
 def render_fusion_localization(subpage: str = "生成定位评估文件") -> None:
     st.subheader("融合定位")
     if subpage == "生成定位评估文件":

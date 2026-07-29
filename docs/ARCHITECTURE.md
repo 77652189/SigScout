@@ -25,21 +25,23 @@ flowchart TD
 ## 2. 入口层
 
 - **CLI**（`src/sigscout/cli.py`，109 行）：`argparse` 四个子命令 `discover`/`screen`/`annotate-source`/`serve`；只依赖 `SignalPeptideLibraryService`、`SignalPeptideScreeningService`、`USPNetAdapter`——没有直接依赖 fusion/experimental 相关模块，是全代码库里耦合最干净的入口。
-- **Streamlit UI**（`src/sigscout/ui/`，[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 1 完成，`streamlit_app.py` 从 1839 行降到 **60 行**）：见下方"UI 层文件表"。
+- **Streamlit UI**（`src/sigscout/ui/`，[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 1 完成，`streamlit_app.py` 从 1839 行降到 60 行；UX 改善计划 Phase C 又把导航机制从手写 `st.sidebar.radio` 换成 Streamlit 原生 `st.navigation`/`st.Page`，行数微升到 **64 行**）：见下方"UI 层文件表"。
 
-### UI 层文件表（Phase 1 完成后）
+### UI 层文件表（UX 改善计划 Phase A/B/C 完成后）
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `streamlit_app.py` | 60 | sys.path 兼容代码（`streamlit run` 直接执行脚本时让 `sigscout` 包可导入）、`main()`（侧边栏四路导航分发）、`__main__` 守卫。不再包含任何页面渲染逻辑 |
-| `_shared.py` | 375 | 跨页面共用：`PATHS`（`ProjectPaths.discover` 结果）、`st.set_page_config`（模块加载时执行一次）、`_css`、`_local_screening_service`/`_example_screening_service`/`_load_result`/`_load_representative_frames`、`_ensure_display_columns`、`_sorted_unique`、`_render_pagination_controls`（+ `_clamp_page`/`_set_page`/`_set_page_from_widget`） |
-| `views/screening.py` | 134 | "毕赤酵母信号肽筛选"：`render_screening`、`render_source_protein_annotation`、`render_help`、结果摘要渲染 |
-| `views/representatives.py` | 461 | "代表序列与下载"：候选浏览（含 OPN 实验视图切换）/证据分布/相似序列/原始数据四个子页、下载按钮。含两个疑似死代码函数，见下方说明 |
-| `views/fusion_localization.py` | 680 | "融合定位"：构建生成面板、DeepLoc/BUSCA 导入、定位缓存、融合序列复制区——UI 层里最大的文件，因为它同时承接 `fusion_constructs`/`fusion_scoring`/`localization_import`/`experimental_evidence` 四个 service 模块的展示逻辑 |
-| `views/experimental_feedback.py` | 165 | "实验反馈"：OPN 实验结果展示、CSV 导入与模板 |
+| `streamlit_app.py` | 64 | sys.path 兼容代码（`streamlit run` 直接执行脚本时让 `sigscout` 包可导入）、`main()`（用 `st.navigation` 定义 4 个分组 × 各自子页面，每个子页面对应一个带图标的 `st.Page`）、`__main__` 守卫。不再包含任何页面渲染逻辑 |
+| `_shared.py` | 371 | 跨页面共用：`PATHS`（`ProjectPaths.discover` 结果）、`st.set_page_config`（模块加载时执行一次）、`_css`、`_local_screening_service`/`_example_screening_service`/`_load_result`/`_load_representative_frames`、`_ensure_display_columns`、`_sorted_unique`、`_render_pagination_controls`（+ `_clamp_page`/`_set_page`/`_set_page_from_widget`）。分页控件 Phase B 后是 6 个（原 7 个，"跳转页"输入框和"跳转"按钮合并成一个 `on_change` 触发的 `number_input`） |
+| `views/screening.py` | 168 | "毕赤酵母信号肽筛选"：`render_screening`（+ `page_screening`/`page_source_annotation` 两个 `st.Page` 用无参包装）、`render_source_protein_annotation`、`render_help`、结果摘要渲染（Phase B 后按漏斗分组展示 7 个指标）、`_render_onboarding_banner`（Phase C 新增，仅在落地页显示的一次性首次使用引导，状态记在 `st.session_state["onboarding_dismissed"]`） |
+| `views/representatives.py` | 484 | "代表序列与下载"：候选浏览（含 OPN 实验视图切换）/证据分布/相似序列/原始数据四个子页（+ 4 个 `page_*` 包装函数）、下载按钮。候选卡片 Phase B 后把 N/H 区细节和依据说明收进 `st.expander`。含两个疑似死代码函数，见下方说明 |
+| `views/fusion_localization.py` | 693 | "融合定位"：构建生成面板、DeepLoc/BUSCA 导入、定位缓存、融合序列复制区（+ 2 个 `page_*` 包装函数）——UI 层里最大的文件，因为它同时承接 `fusion_constructs`/`fusion_scoring`/`localization_import`/`experimental_evidence` 四个 service 模块的展示逻辑。Phase A 后新增 `_render_batch_processing_notes`（按批次去重展示 B/C 固定序列相关说明，而不是每个构建卡片重复一遍），Phase B 后构建卡片的评分明细收进 `st.expander` |
+| `views/experimental_feedback.py` | 173 | "实验反馈"：结果展示（顶层导航标签 Phase C 后从"OPN 实验结果"泛化为"实验结果"，页面内部提示文字仍明确说明数据来自 OPN 实验）、CSV 导入与模板（+ `page_experimental_results`/`page_experimental_import` 两个包装函数） |
 | `experimental_browser.py` | 322 | 不属于本次拆分范围（Phase 1 之前就已独立成文件），嵌入 `views/representatives.py` 的"候选浏览"页面，不是独立导航项 |
 
 **命名坑，记录下来避免以后重蹈**：新目录本来想按计划叫 `ui/pages/`，实际建出来后 Streamlit 会把它当成自己的[多页面应用](https://docs.streamlit.io/develop/concepts/multipage-apps)功能目录，自动在侧边栏顶部加一份基于文件名生成的导航列表（这些文件本身不是可独立运行的页面，点开是空白页）。这个问题只有真正 `streamlit run` 起来才会暴露，`pytest`/`compileall` 都测不出来。已改名为 `ui/views/`，问题解决——以后新增 UI 子目录时不要用 `pages` 这个名字。
+
+**`st.Page` 的一个约束，记录下来避免以后重蹈**：`st.Page` 传入的 callable 不能带参数，所以原来 `render_screening(subpage: str)` 这类"一个函数处理多个子页面、靠字符串参数分支"的写法不能直接注册成页面——每个 view 模块都加了一组无参数的 `page_*` 包装函数（内部固定传参调用原来的 `render_*`），只是 `st.navigation` 和原有渲染逻辑之间的一层薄适配，原有的 `render_*(subpage)` 函数本身没有重构。
 
 **已知死代码**：`views/representatives.py` 里的 `_render_representative_table`（47 行）和 `_render_representative_workbench`（13 行），通过调用图确认 in-degree 为 0，`main()` 的可达调用链完全没用到，大概率是早期设计（表格视图/tabs 布局）被"候选浏览"卡片视图取代后留下的。Phase 1 只做纯搬移没有删代码，这两个函数原样保留在新文件里，是否删除需要用户决定。
 
