@@ -24,7 +24,7 @@ class ProjectPaths:
         return self.root / "local_runs"
 
     @property
-    def opn_saved_screening_dir(self) -> Path:
+    def example_saved_screening_dir(self) -> Path:
         return self.root / "examples" / "opn" / "saved_screening"
 
     @property

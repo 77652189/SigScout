@@ -404,14 +404,33 @@ class SignalPeptideScreeningService:
 
     def annotate_persisted_source_proteins(self, *, use_quickgo: bool = False) -> dict[str, object]:
         paths = self._output_paths()
-        annotated_any = False
-        summary_update: dict[str, object] = {}
+        rows_by_path = self._load_persisted_rows_for_annotation(paths)
+        annotation_kwargs = self._collect_quickgo_annotations(rows_by_path, use_quickgo=use_quickgo)
+        annotated_any, summary_update = self._annotate_persisted_csv_files(rows_by_path, annotation_kwargs, paths)
+
+        if not annotated_any:
+            return {
+                "success": False,
+                "message": "没有找到可评估的候选 CSV；请先刷新毕赤酵母信号肽筛选结果。",
+            }
+        return self._finalize_source_protein_annotation(paths, summary_update)
+
+    def _load_persisted_rows_for_annotation(
+        self, paths: dict[str, Path]
+    ) -> dict[str, list[dict[str, object]]]:
         rows_by_path: dict[str, list[dict[str, object]]] = {}
         for key in ("uniprot_csv", "duplicate_csv", "comparison_csv"):
             path = paths[key]
             if path.exists():
                 rows_by_path[key] = _read_csv_rows(path)
+        return rows_by_path
 
+    def _collect_quickgo_annotations(
+        self,
+        rows_by_path: dict[str, list[dict[str, object]]],
+        *,
+        use_quickgo: bool,
+    ) -> dict[str, object]:
         quickgo_annotations_by_accession: dict[str, list[dict[str, object]]] | None = None
         quickgo_ancestors_by_id: dict[str, set[str]] = {}
         quickgo_terms_by_id: dict[str, str] = {}
@@ -430,14 +449,22 @@ class SignalPeptideScreeningService:
             quickgo_terms_by_id = quickgo_result.go_terms_by_id
             quickgo_errors = quickgo_result.errors
             quickgo_query_at = quickgo_result.query_at
-
-        annotation_kwargs = {
+        return {
             "quickgo_annotations_by_accession": quickgo_annotations_by_accession,
             "go_ancestors_by_id": quickgo_ancestors_by_id,
             "go_terms_by_id": quickgo_terms_by_id,
             "quickgo_query_at": quickgo_query_at,
             "quickgo_errors": quickgo_errors,
         }
+
+    def _annotate_persisted_csv_files(
+        self,
+        rows_by_path: dict[str, list[dict[str, object]]],
+        annotation_kwargs: dict[str, object],
+        paths: dict[str, Path],
+    ) -> tuple[bool, dict[str, object]]:
+        annotated_any = False
+        summary_update: dict[str, object] = {}
 
         if "uniprot_csv" in rows_by_path:
             result = annotate_source_protein_routes(rows_by_path["uniprot_csv"], **annotation_kwargs)
@@ -459,22 +486,23 @@ class SignalPeptideScreeningService:
             summary_update.update(result.summary)
             annotated_any = True
 
-        if annotated_any:
-            summary_payload = _read_json_dict(paths["summary_json"])
-            if summary_payload:
-                write_json(paths["summary_json"], {**summary_payload, **summary_update})
-            discovery_payload = _read_json_dict(paths["discovery_summary_json"])
-            if discovery_payload:
-                write_json(paths["discovery_summary_json"], {**discovery_payload, **summary_update})
-            return {
-                **summary_update,
-                "success": True,
-                "message": f"已完成来源蛋白辅助评估：{summary_update.get('source_protein_annotated_count', 0)} 条。",
-            }
+        return annotated_any, summary_update
 
+    def _finalize_source_protein_annotation(
+        self,
+        paths: dict[str, Path],
+        summary_update: dict[str, object],
+    ) -> dict[str, object]:
+        summary_payload = _read_json_dict(paths["summary_json"])
+        if summary_payload:
+            write_json(paths["summary_json"], {**summary_payload, **summary_update})
+        discovery_payload = _read_json_dict(paths["discovery_summary_json"])
+        if discovery_payload:
+            write_json(paths["discovery_summary_json"], {**discovery_payload, **summary_update})
         return {
-            "success": False,
-            "message": "没有找到可评估的候选 CSV；请先刷新毕赤酵母信号肽筛选结果。",
+            **summary_update,
+            "success": True,
+            "message": f"已完成来源蛋白辅助评估：{summary_update.get('source_protein_annotated_count', 0)} 条。",
         }
 
     def _output_paths(self) -> dict[str, Path]:

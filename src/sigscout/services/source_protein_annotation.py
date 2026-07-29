@@ -5,7 +5,6 @@ from collections import Counter
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Iterable
 
 from sigscout.core.coercion import json_dumps, list_values, now_iso
 from sigscout.services.evidence_classification import (
