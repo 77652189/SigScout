@@ -10,7 +10,9 @@
 - 每个 Phase 建议单独提交，commit message 用 `refactor(...): ...`，方便出问题时单独回滚某一步。
 - 涉及 README/`docs/` 里目标蛄白名称的部分，本计划不改 README 内容，只改代码结构，不触发 [REQUIREMENTS.md](REQUIREMENTS.md) 第 5 节的脱敏边界。
 
-推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。
+推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4 已完成，下一步是 Phase 3。
+
+**跨 Phase 的通用教训**（Phase 0 和 Phase 4 都踩到过，后面的 Phase 也要留意）：不要只按函数名去重/拆分，先读完整函数体再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import。两次都是先看了完整实现才发现问题，不是一开始就预料到的。
 
 ---
 
@@ -43,14 +45,26 @@
 
 ---
 
-## Phase 4 — 拆 `services/source_protein_annotation.py`（455 行）
+## Phase 4 — 拆 `services/source_protein_annotation.py` ✅ 完成于 2026-07-28（455 → 313 行）
 
-- [ ] 保留在原文件：路线匹配引擎——`annotate_source_protein_route(s)`、`_route_matches`、`_load_route_map`、`RouteMatch`。
-- [ ] 新建 `services/evidence_classification.py`，移入：证据代码分级常量（`EXPERIMENTAL_*`/`CURATED_*`/`AUTOMATIC_*`）、`_evidence_level`、`_all_evidence_codes`、`_go_evidence_prefix`、`_evidence_code_label`、`_evidence_summary`、`_source_route_note`、`_format_go`、`_confidence_for`。
-- [ ] 更新 `source_protein_annotation.py` 的 import。
-- [ ] 跑 `python -m pytest -q`（重点看 `tests/test_source_protein_annotation.py`）。
+- [x] 保留在原文件：路线匹配引擎——`annotate_source_protein_route(s)`、`_route_matches`、`_load_route_map`、`RouteMatch`。
+- [x] 新建 `services/evidence_classification.py`（148 行），移入：证据代码分级常量（`EXPERIMENTAL_*`/`CURATED_*`/`AUTOMATIC_*`）、`evidence_level`、`_all_evidence_codes`、`_go_evidence_prefix`、`evidence_code_label`、`evidence_summary`、`source_route_note`、`format_go`、`confidence_for`。
+- [x] 更新 `source_protein_annotation.py` 的 import。
+- [x] 跑 `python -m pytest -q`（53/53 通过，`tests/test_source_protein_annotation.py` 覆盖端到端路线判定结果，无需改动）。
 
-风险：低（`test_source_protein_annotation.py` 已经端到端覆盖路线判定结果）。
+**执行时发现计划没预料到的问题——循环 import：**
+
+`evidence_classification.py` 需要用到原文件的 `ROUTE_UNKNOWN`、`RouteMatch`、`_list_values`；但拆分后 `source_protein_annotation.py` 又要反过来 import 新文件里的 6 个函数——两个文件互相 import 会在运行时报 `ImportError`（Python 处理不了这种循环）。解决方式（单向依赖，不再是原计划设想的"新文件单纯从旧文件借东西"）：
+
+- `ROUTE_UNKNOWN` 的定义搬去了 `evidence_classification.py`（它的两个函数 `confidence_for`/`source_route_note` 才是真正拿它做判断的地方），`source_protein_annotation.py` 反过来从新文件 import 回来。
+- `RouteMatch` 仍然留在 `source_protein_annotation.py`（它是 `_route_matches` 构造的核心数据结构，这个不动）；`evidence_classification.py` 里两处只是拿它当类型标注，用 `typing.TYPE_CHECKING` 包起来导入，不会在运行时真正 import，从而不构成循环。
+- `_list_values` 挪去了 `src/sigscout/core/coercion.py`（改名 `list_values`，公开），因为这是个通用的"值/list 归一化"小工具，跟 Phase 0 收敛掉的那批工具函数是同一类东西，两个文件都从这里拿，谁也不依赖谁。
+
+另外，把 `_evidence_level` 等 8 个函数改成公开名字（去掉下划线）后，`annotate_source_protein_route` 里原来有个局部变量也叫 `evidence_level`，和新 import 进来的同名函数撞名——虽然 Python 语法上不会报错（赋值右边先算完再绑定左边名字），但容易在以后维护时踩坑，所以把这个局部变量顺手改名成了 `level`。
+
+依赖方向变成单向：`source_protein_annotation.py → evidence_classification.py → core/coercion.py`，没有循环。
+
+风险：低，已验证。
 
 ---
 

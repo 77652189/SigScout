@@ -37,3 +37,11 @@ def now_iso() -> str:
 
 def json_dumps(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def list_values(value: object) -> list[str]:
+    if isinstance(value, list):
+        values = value
+    else:
+        values = [value]
+    return [str(item).strip() for item in values if str(item).strip()]

@@ -7,45 +7,20 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Iterable
 
-from sigscout.core.coercion import json_dumps, now_iso
+from sigscout.core.coercion import json_dumps, list_values, now_iso
+from sigscout.services.evidence_classification import (
+    ROUTE_UNKNOWN,
+    confidence_for,
+    evidence_code_label,
+    evidence_level,
+    evidence_summary,
+    format_go,
+    source_route_note,
+)
 
 
 ANNOTATION_STATUS_PENDING = "未评估"
 ANNOTATION_STATUS_DONE = "已评估"
-ROUTE_UNKNOWN = "未知"
-
-EXPERIMENTAL_GO_EVIDENCE = {
-    "EXP",
-    "IDA",
-    "IPI",
-    "IMP",
-    "IGI",
-    "IEP",
-    "HTP",
-    "HDA",
-    "HMP",
-    "HGI",
-    "HEP",
-}
-CURATED_GO_EVIDENCE = {
-    "ISS",
-    "ISO",
-    "ISA",
-    "ISM",
-    "IGC",
-    "IBA",
-    "IBD",
-    "IKR",
-    "IRD",
-    "RCA",
-    "TAS",
-    "IC",
-}
-AUTOMATIC_GO_EVIDENCE = {"IEA"}
-
-EXPERIMENTAL_ECO_CODES = {"ECO:0000269"}
-CURATED_ECO_CODES = {"ECO:0000305", "ECO:0000250"}
-AUTOMATIC_ECO_CODES = {"ECO:0000256", "ECO:0007826", "ECO:0007322"}
 
 
 @dataclass(frozen=True)
@@ -127,21 +102,21 @@ def annotate_source_protein_route(
     _fill_go_terms(evidence, go_terms_by_id)
     matches = _route_matches(evidence, route_map, go_ancestors_by_id, go_terms_by_id)
     best_match = sorted(matches, key=lambda item: item.priority)[0] if matches else None
-    evidence_level = _evidence_level(row, evidence, matches)
+    level = evidence_level(row, evidence, matches)
     route = best_match.route if best_match else ROUTE_UNKNOWN
-    confidence = _confidence_for(route, evidence_level)
+    confidence = confidence_for(route, level)
     selected_matches = [match for match in matches if match.route == route]
     basis = "; ".join(dict.fromkeys(match.basis for match in sorted(selected_matches, key=lambda item: item.priority)))
-    summary = _evidence_summary(evidence, selected_matches)
+    summary = evidence_summary(evidence, selected_matches)
 
     return {
         **row,
         "source_protein_route": route,
         "source_protein_route_confidence": confidence,
-        "source_protein_evidence_level": evidence_level,
+        "source_protein_evidence_level": level,
         "source_protein_route_basis": basis,
         "source_protein_evidence_summary": summary,
-        "source_protein_route_note": _source_route_note(route, evidence_level, basis),
+        "source_protein_route_note": source_route_note(route, level, basis),
         "source_protein_quickgo_json": json_dumps(quickgo),
         "source_protein_quickgo_count": len(quickgo),
         "source_protein_quickgo_query_at": quickgo_query_at or str(row.get("source_protein_quickgo_query_at", "")),
@@ -202,7 +177,7 @@ def _route_matches(
                         route=route,
                         priority=priority,
                         basis=f"UniProt feature：{feature_type} -> {route}",
-                        evidence_codes=tuple(_list_values(feature.get("evidence_codes", []))),
+                        evidence_codes=tuple(list_values(feature.get("evidence_codes", []))),
                         source="UniProtKB feature",
                     )
                 )
@@ -216,7 +191,7 @@ def _route_matches(
                         route=route,
                         priority=priority,
                         basis=f"UniProt 定位：{label} -> {route}",
-                        evidence_codes=tuple(_list_values(location.get("evidence_codes", []))),
+                        evidence_codes=tuple(list_values(location.get("evidence_codes", []))),
                         source="UniProtKB subcellular location",
                     )
                 )
@@ -233,13 +208,13 @@ def _route_matches(
                 evidence_code = str(annotation.get("go_evidence") or annotation.get("evidence_code") or "")
                 root = matched_roots[0]
                 root_term = go_terms_by_id.get(root, "")
-                evidence_text = f"，证据：{_evidence_code_label(evidence_code)}" if evidence_code else ""
+                evidence_text = f"，证据：{evidence_code_label(evidence_code)}" if evidence_code else ""
                 matches.append(
                     RouteMatch(
                         route=route,
                         priority=priority,
                         basis=(
-                            f"GO 证据：{_format_go(go_id, term)} 属于 {_format_go(root, root_term)}，"
+                            f"GO 证据：{format_go(go_id, term)} 属于 {format_go(root, root_term)}，"
                             f"映射为{route}{evidence_text}"
                         ),
                         evidence_codes=tuple(value for value in (evidence_code,) if value),
@@ -306,103 +281,6 @@ def _legacy_feature_entries(row: dict[str, object]) -> list[dict[str, object]]:
     ]
 
 
-def _evidence_level(
-    row: dict[str, object],
-    evidence: dict[str, list[dict[str, object]]],
-    matches: list[RouteMatch],
-) -> str:
-    codes = _all_evidence_codes(evidence)
-    match_codes = {code for match in matches for code in match.evidence_codes}
-    all_codes = codes | match_codes
-    go_codes = {_go_evidence_prefix(code) for code in all_codes if _go_evidence_prefix(code)}
-    eco_codes = {code for code in all_codes if code.startswith("ECO:")}
-    if go_codes & EXPERIMENTAL_GO_EVIDENCE or eco_codes & EXPERIMENTAL_ECO_CODES:
-        return "实验支持"
-    if go_codes & CURATED_GO_EVIDENCE or eco_codes & CURATED_ECO_CODES:
-        return "人工/同源推断"
-    if go_codes & AUTOMATIC_GO_EVIDENCE or eco_codes & AUTOMATIC_ECO_CODES or all_codes:
-        return "自动/预测证据"
-    return "无明确证据"
-
-
-def _all_evidence_codes(evidence: dict[str, list[dict[str, object]]]) -> set[str]:
-    codes: set[str] = set()
-    for group in evidence.values():
-        for item in group:
-            codes.update(_list_values(item.get("evidence_codes", [])))
-            for key in ("go_evidence", "evidence_code"):
-                value = str(item.get(key, "")).strip()
-                if value:
-                    codes.add(value)
-    return codes
-
-
-def _confidence_for(route: str, evidence_level: str) -> str:
-    if route == ROUTE_UNKNOWN:
-        return "低"
-    if evidence_level == "实验支持":
-        return "高"
-    if evidence_level == "人工/同源推断":
-        return "中"
-    if evidence_level == "自动/预测证据":
-        return "低"
-    return "低"
-
-
-def _evidence_summary(evidence: dict[str, list[dict[str, object]]], matches: list[RouteMatch]) -> str:
-    parts: list[str] = []
-    locations = [
-        f"{item.get('id', '')} {item.get('value', '')}".strip()
-        for item in evidence["locations"]
-        if item.get("id") or item.get("value")
-    ]
-    go_ids = [
-        f"{item.get('go_id', '')} {item.get('term') or item.get('go_term') or ''}".strip()
-        for item in evidence["go"] + evidence["quickgo"]
-        if item.get("go_id")
-    ]
-    features = [str(item.get("type", "")).strip() for item in evidence["features"] if item.get("type")]
-    if locations:
-        parts.append("UniProt SL: " + ", ".join(dict.fromkeys(locations[:4])))
-    if go_ids:
-        parts.append("GO: " + ", ".join(dict.fromkeys(go_ids[:4])))
-    if features:
-        parts.append("Feature: " + ", ".join(dict.fromkeys(features[:4])))
-    if matches:
-        parts.append("命中依据: " + "; ".join(dict.fromkeys(match.basis for match in matches[:4])))
-    return " | ".join(parts)
-
-
-def _source_route_note(route: str, evidence_level: str, basis: str) -> str:
-    if route == ROUTE_UNKNOWN:
-        return "已汇总 UniProt/GO 结构化证据，但没有命中当前受控 ID 映射；建议人工复核或扩展映射。"
-    if basis:
-        return f"根据受控证据映射得到：{basis}；证据等级：{evidence_level}。"
-    return f"根据受控证据映射得到；证据等级：{evidence_level}。"
-
-
-def _format_go(go_id: str, term: object) -> str:
-    text = str(term or "").strip()
-    return f"{go_id} {text}".strip()
-
-
-def _evidence_code_label(value: str) -> str:
-    prefix = _go_evidence_prefix(value)
-    if prefix in EXPERIMENTAL_GO_EVIDENCE:
-        return f"{value}/实验"
-    if prefix in CURATED_GO_EVIDENCE:
-        return f"{value}/人工或同源推断"
-    if prefix in AUTOMATIC_GO_EVIDENCE:
-        return f"{value}/自动注释"
-    if value in EXPERIMENTAL_ECO_CODES:
-        return f"{value}/实验"
-    if value in CURATED_ECO_CODES:
-        return f"{value}/人工或同源推断"
-    if value in AUTOMATIC_ECO_CODES:
-        return f"{value}/自动注释"
-    return value
-
-
 def _load_route_map() -> dict[str, object]:
     try:
         text = files("sigscout.data").joinpath("source_protein_route_map.json").read_text(encoding="utf-8")
@@ -431,20 +309,5 @@ def _parse_json_list(value: object) -> list[dict[str, object]]:
 
 def _split_values(value: object) -> list[str]:
     return [part.strip() for part in str(value or "").split(";") if part.strip()]
-
-
-def _list_values(value: object) -> list[str]:
-    if isinstance(value, list):
-        values = value
-    else:
-        values = [value]
-    return [str(item).strip() for item in values if str(item).strip()]
-
-
-def _go_evidence_prefix(value: str) -> str:
-    text = str(value).strip()
-    if ":" in text:
-        return text.split(":", 1)[0]
-    return text
 
 
