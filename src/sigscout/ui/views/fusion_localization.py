@@ -79,7 +79,7 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
     target_key, target_preset = _select_fusion_target()
     candidate_rows = representatives.copy()
     selected_ids = set(st.session_state.get(f"fusion_selected_candidate_ids_{target_key}", []))
-    source_options = ["使用全部代表候选"]
+    source_options = ["使用全部代表序列"]
     if target_key == "opn":
         source_options.insert(0, "使用候选浏览已选项")
         feedback = _opn_feedback_rows()
@@ -204,16 +204,11 @@ def _render_fusion_downloads(construct_rows: list[dict[str, object]]) -> None:
         "a_length",
         "b_length",
         "c_length",
-        "has_er_retention_motif",
-        "b_ends_with_kex2_site",
-        "b_pre_region_like",
         "internal_hydrophobic_run_max",
         "signal_peptide_quality",
-        "processing_quality",
         "construct_design_risk",
         "overall_score",
         "overall_priority",
-        "processing_site_note",
     ]
     st.dataframe(
         preview[[column for column in preview_columns if column in preview.columns]].rename(
@@ -225,22 +220,17 @@ def _render_fusion_downloads(construct_rows: list[dict[str, object]]) -> None:
                 "a_length": "A 长度",
                 "b_length": "B 长度",
                 "c_length": "C 长度",
-                "has_er_retention_motif": "ER 保留 motif 风险",
-                "b_ends_with_kex2_site": "B 末端 Kex2 位点",
-                "b_pre_region_like": "B 疑似含 pre-region",
                 "internal_hydrophobic_run_max": "最长内部疏水连续段",
                 "signal_peptide_quality": "信号肽质量",
-                "processing_quality": "加工质量",
                 "construct_design_risk": "设计风险",
                 "overall_score": "综合分",
                 "overall_priority": "优先级",
-                "processing_site_note": "加工位点说明",
             }
         ),
         hide_index=True,
         use_container_width=True,
     )
-
+    _render_batch_processing_notes(preview)
 
 
 def _render_deeploc_manual_workflow() -> None:
@@ -267,9 +257,9 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
     cache_cols = st.columns([2.2, 1.0])
     if cached_count:
         if construct_rows:
-            cache_cols[0].success(f"已自动加载 {cached_count} 条 {tool_name.upper()} 缓存结果：{cache_path}")
+            cache_cols[0].success(f"已自动加载 {cached_count} 条 {tool_name.upper()} 缓存结果。")
         else:
-            cache_cols[0].success(f"已直接展示 {cached_count} 条 {tool_name.upper()} 缓存结果：{cache_path}")
+            cache_cols[0].success(f"已直接展示 {cached_count} 条 {tool_name.upper()} 缓存结果。")
         st.session_state[session_rows_key] = cached_rows
     elif cache_path.exists() and construct_rows:
         cache_cols[0].warning("检测到缓存文件，但当前构建序列已变化，未自动套用旧结果。")
@@ -331,7 +321,6 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
         "external_vacuole_probability",
         "signal_peptide_quality",
         "signal_peptide_detail_score",
-        "processing_quality",
         "external_localization_support",
         "localization_probability_score",
         "source_context_score",
@@ -340,7 +329,6 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
         "overall_score",
         "overall_priority",
         "construct_length",
-        "processing_site_note",
     ]
     st.markdown("**定位评估排序表**")
     st.dataframe(
@@ -361,7 +349,6 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
                 "external_vacuole_probability": "液泡概率",
                 "signal_peptide_quality": "信号肽质量",
                 "signal_peptide_detail_score": "A细节分",
-                "processing_quality": "加工质量",
                 "external_localization_support": "外部定位支持",
                 "localization_probability_score": "定位概率分",
                 "source_context_score": "来源证据分",
@@ -370,12 +357,12 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
                 "overall_score": "综合分",
                 "overall_priority": "优先级",
                 "construct_length": "长度",
-                "processing_site_note": "加工位点说明",
             }
         ),
         hide_index=True,
         use_container_width=True,
     )
+    _render_batch_processing_notes(frame)
     _render_fusion_sequence_copy_panel(frame)
     st.download_button(
         "下载合并定位结果 CSV",
@@ -424,6 +411,26 @@ def _render_experimental_match_tabs(frame: pd.DataFrame, target_key: str) -> Non
             st.dataframe(missing[[c for c in evidence_columns if c in missing]], hide_index=True, use_container_width=True)
         if exact.empty and related.empty and missing.empty:
             st.info("当前构建没有 OPN 精确序列实验关联；新增候选可能需要重新生成 FASTA 并运行定位评估。")
+
+
+def _render_batch_processing_notes(frame: pd.DataFrame) -> None:
+    if frame.empty or "processing_site_note" not in frame.columns:
+        return
+    lines: list[str] = []
+    if "has_er_retention_motif" in frame.columns and bool(frame["has_er_retention_motif"].iloc[0]):
+        lines.append("C 末端存在 ER 保留 motif（KDEL/HDEL），可能影响分泌效率，建议复核。")
+    seen_notes: set[str] = set()
+    for note in frame["processing_site_note"].astype(str):
+        note = note.strip()
+        if note and note not in seen_notes:
+            seen_notes.add(note)
+            lines.append(note)
+    if not lines:
+        return
+    with st.container(border=True):
+        st.caption("关于当前 B/C 序列（同批次所有构建共用，不随信号肽候选变化）")
+        for line in lines:
+            st.markdown(f"- {line}")
 
 
 def _render_localization_summary(frame: pd.DataFrame) -> None:
@@ -520,7 +527,6 @@ def _render_fusion_sequence_card(row: pd.Series) -> None:
             key=f"fusion_sequence_{construct_id}",
             label_visibility="collapsed",
         )
-        st.caption(str(row.get("processing_site_note", "")).strip())
         match_type = str(row.get("experimental_match_type", "none"))
         if match_type != "none":
             st.info(
@@ -547,7 +553,6 @@ def _fusion_score_strip(row: pd.Series) -> str:
     items = [
         ("定位概率分", row.get("localization_probability_score")),
         ("A细节分", row.get("signal_peptide_detail_score")),
-        ("加工质量", row.get("processing_quality")),
         ("来源证据", row.get("source_context_score")),
         ("膜/液泡风险", row.get("membrane_or_vacuole_risk")),
     ]

@@ -41,7 +41,6 @@ def render_screening(subpage: str = "刷新并筛选毕赤酵母信号肽") -> N
         st.warning("没有可展示的筛选结果。请先刷新毕赤酵母信号肽。")
         return
     _render_summary(result)
-    st.caption(f"当前展示目录：{result.output_dir}")
     if result.errors:
         with st.expander("运行提示 / 错误信息", expanded=False):
             st.write(result.errors)

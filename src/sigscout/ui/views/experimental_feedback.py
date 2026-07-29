@@ -73,7 +73,7 @@ def _render_experimental_feedback_results(rows: pd.DataFrame, warnings: tuple[st
     ]].copy()
     display["measurement_status"] = display["measurement_status"].map({
         "measured": "已测得",
-        "result_missing": "报告未给产量",
+        "result_missing": "结果缺失",
     })
     display = display.rename(columns={
         "batch_rank": "批内排名",
@@ -144,7 +144,7 @@ def _render_experimental_sequence_details(batch: pd.DataFrame) -> None:
 
 def _render_experimental_feedback_import(path: Path) -> None:
     st.markdown("**导入 OPN 实验反馈**")
-    st.caption(f"数据保存在本地忽略目录：{path}。上传会替换当前 OPN 实验反馈文件，不会修改候选库。")
+    st.caption("数据保存在本地忽略目录。上传会替换当前 OPN 实验反馈文件，不会修改候选库。")
     st.download_button(
         "下载实验反馈 CSV 模板",
         experimental_feedback_template().encode("utf-8-sig"),

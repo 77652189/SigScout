@@ -40,7 +40,7 @@ def render_opn_experimental_browser(representatives: pd.DataFrame, local_runs_di
     _pager(page, total_pages, "top")
     start = (page - 1) * page_size
     visible = frame.iloc[start:start + page_size]
-    for status, label in (("measured", "已测试候选"), ("result_missing", "结果缺失"), ("untested", "未测试候选")):
+    for status, label in (("measured", "已测得候选"), ("result_missing", "结果缺失"), ("untested", "未测试候选")):
         rows = visible[visible["experimental_status"].astype(str).eq(status)]
         if rows.empty:
             continue
@@ -68,7 +68,7 @@ def _render_experimental_decision_summary(frame: pd.DataFrame) -> None:
     cols[0].metric("优先复验", int(measured["实验建议"].eq("优先复验").sum()))
     cols[1].metric("中等优先", int(measured["实验建议"].eq("中等优先").sum()))
     cols[2].metric("暂缓", int(measured["实验建议"].eq("暂缓").sum()))
-    cols[3].metric("仍待探索", len(untested))
+    cols[3].metric("未测试候选", len(untested))
     best = measured.iloc[0]
     st.success(
         f"当前实验锚点：{best.get('source_note', best.get('candidate_id', ''))}；"
@@ -140,7 +140,7 @@ def _render_guided_exploration(frame: pd.DataFrame) -> None:
         return
     channel_counts = panel["exploration_channel"].value_counts()
     metrics = st.columns(5)
-    metrics[0].metric("原始未测试", int(frame["experimental_status"].astype(str).eq("untested").sum()))
+    metrics[0].metric("未测试候选", int(frame["experimental_status"].astype(str).eq("untested").sum()))
     metrics[1].metric("探索池", len(panel))
     metrics[2].metric("正向邻域", int(channel_counts.get("正向锚点邻域", 0)))
     metrics[3].metric("多样性保留", int(channel_counts.get("多样性保留", 0)))

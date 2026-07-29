@@ -158,7 +158,7 @@ def _render_candidate_filters(representatives: pd.DataFrame) -> pd.DataFrame:
     search = filter_cols[2].text_input("搜索", placeholder="候选 ID / accession / 来源蛋白 / 证据")
     sort_by = filter_cols[3].selectbox(
         "排序",
-        ["综合推荐优先", "证据较强优先", "规则分数高优先", "相似组大优先"],
+        ["综合推荐优先", "证据较强优先", "规则分数高优先", "相似分组大优先"],
         index=0,
     )
 
@@ -299,7 +299,7 @@ def _sort_representatives(frame: pd.DataFrame, sort_by: str) -> pd.DataFrame:
     elif sort_by == "规则分数高优先":
         keys = ["_rules_score_numeric", "_evidence_rank", "candidate_id"]
         ascending = [False, True, True]
-    elif sort_by == "相似组大优先":
+    elif sort_by == "相似分组大优先":
         keys = ["_similar_group_size_numeric", "_rules_score_numeric", "candidate_id"]
         ascending = [False, False, True]
     else:

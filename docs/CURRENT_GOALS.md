@@ -9,15 +9,18 @@
 - **Phase 1（拆 `ui/streamlit_app.py`）**：1826 → **60 行**。新增 `ui/_shared.py`（375 行，跨页面共用）和 `ui/views/{screening,representatives,fusion_localization,experimental_feedback}.py` 四个页面文件。执行时踩到一个新类型的坑：新目录本来想按计划叫 `ui/pages/`，实际建出来后被 Streamlit 自己的多页面应用功能误认成页面目录，自动在侧边栏加了一份多余的导航列表——这个问题只有真正启动 `streamlit run` 才暴露，`pytest`/`compileall` 都测不出来。已改名为 `ui/views/` 解决。手动过了一遍全部 4 个导航项、10 个子页（含数据量最大的"OPN 实验视图"和"导入 DeepLoc 结果"），和 Phase 1 之前的基线逐项比对一致，控制台零报错——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 1。
 - **Phase 5（`services/__init__.py` 导入契约）**：选定方案 B——放弃 `__init__.py` 精选重导出层。全仓库 grep 确认零消费者依赖包级 `sigscout.services` 导入后，把 49 行的重导出列表替换成一份 6 行说明性注释；不需要改任何调用方代码。`compileall`/`pytest`（53/53）/`sigscout.cli --help`/手动 Streamlit 冒烟测试全部确认无回归——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5。
 - 六个 Phase 期间 `python -m pytest -q` 全程 53/53 通过，没有新增测试（重构不改变行为，本来就不需要新测试；唯一的测试覆盖缺口仍是 UI 层，见下方"已知的坑"）。
+- **UX 改善计划启动（2026-07-29）**：代码重构结束后做了一次全局复盘——功能上已对齐 [REQUIREMENTS.md](REQUIREMENTS.md) 全部 10 项能力，判定"功能已足够完善"；用户据此定下下一阶段目标：易用性/UI 布局/学习成本。计划分三步：A 低风险清理 → B 信息层次重设计 → C 导航/引导重设计，一步一步做，每步都等明确同意再继续。计划全文见 `.claude/plans/merry-forging-aurora.md`（本地，未纳入 git）。
+- **Phase A 已完成（2026-07-29）**：(1) 去掉 4 处暴露给用户的本地绝对路径（`screening.py`/`fusion_localization.py`×2/`experimental_feedback.py`）；(2) 融合构建里几个"同批次所有构建共用、和候选无关"的字段（`processing_site_note`、`has_er_retention_motif`、`b_ends_with_kex2_site`、`b_pre_region_like`、`processing_quality`）之前被当成每行/每卡片都重复展示（422 个构建卡片各展示一遍完全相同的文字），现在改成生成/导入结果后只展示一次的汇总说明，两个预览表也去掉了这几列；(3) 统一了几处不一致的措辞（"相似组"→"相似分组"、"代表候选"→"代表序列"、实验状态 untested/measured/result_missing 各自 2-4 种不同标签→每个状态一个标准标签）。`compileall`/`pytest`（53/53）全绿，手动过了一遍受影响的页面（筛选页、融合定位两个子页、代表序列候选浏览、OPN 实验视图），确认路径不再出现、汇总说明正确按批次去重展示、术语统一生效，没有信息丢失。
 
-## 下一步（没有排队中的 Phase，以下都是可选、非阻塞的清理项，你决定要不要做、什么时候做）
+## 下一步
 
-1. **五个 Phase 一致的教训**：写执行计划时凭经验列出的清单，动手前必须用代码里的真实依赖关系（以及目标框架的实际运行行为，Phase 1 才发现这一层）去核实，不能直接当真——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 开头的"跨 Phase 通用教训"。
-2. **顺带发现、还没处理的可选清理项**（都不在已完成 Phase 的范围内，只是顺带记录）：
+1. **UX 计划 Phase B（信息层次重设计）待你确认后开始**：候选卡片/构建卡片把次要诊断细节收进 `st.expander`，只保留一个明确的头部结论；筛选页 7 个指标按漏斗顺序分组；简化 `_render_pagination_controls` 的 7 个控件。细节见 `.claude/plans/merry-forging-aurora.md` Phase B。
+2. **五个 Phase 一致的教训**：写执行计划时凭经验列出的清单，动手前必须用代码里的真实依赖关系（以及目标框架的实际运行行为，Phase 1 才发现这一层）去核实，不能直接当真——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 开头的"跨 Phase 通用教训"。
+3. **顺带发现、还没处理的可选清理项**（都不在已完成 Phase 的范围内，只是顺带记录）：
    - `screening.py` 里现在最长的方法是 `annotate_persisted_source_proteins`（74 行）。
    - `ui/views/representatives.py` 里的 `_render_representative_table`/`_render_representative_workbench` 两个函数疑似死代码（in-degree 0，`main()` 可达调用链用不到），Phase 1 只做纯搬移没有删代码，原样保留，删不删需要你决定。
-   - 实验反馈闭环的单目标硬编码（见下方"已知的坑"第 2 条）——如果近期要接第二个目标蛋白的湿实验数据，这个需要先解决。
-3. **如果代码库继续增长、又出现新的过大文件/耦合问题**：参照 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 的方法论（先用 codebase-memory-mcp 的真实调用图摸底，再动手拆分、每步验证）重新走一遍流程，不需要照搬这次的具体 Phase 编号。
+   - 实验反馈闭环的单目标硬编码（见下方"已知的坑"第 2 条）——如果近期要接第二个目标蛋白的湿实验数据，这个需要先解决。这条明确不在 UX 计划范围内（驱动原因是多目标就绪度，不是易用性）。
+4. **如果代码库继续增长、又出现新的过大文件/耦合问题**：参照 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 的方法论（先用 codebase-memory-mcp 的真实调用图摸底，再动手拆分、每步验证）重新走一遍流程，不需要照搬这次的具体 Phase 编号。
 
 ## 已知的坑（写代码/改文档前先看一眼）
 
