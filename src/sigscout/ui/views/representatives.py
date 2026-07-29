@@ -208,12 +208,14 @@ def _render_candidate_cards(frame: pd.DataFrame) -> None:
             st.markdown(_sequence_html(str(row.get("signal_peptide_sequence", ""))), unsafe_allow_html=True)
             basis = str(row.get("source_protein_route_basis", "")).strip()
             summary = str(row.get("source_protein_evidence_summary", "")).strip()
-            st.markdown(
-                "<div class='evidence-panel'>"
-                f"<div class='evidence-label'>依据说明</div><div>{escape(basis or summary or '未记录明确依据')}</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
+            with st.expander("评分细节与依据说明"):
+                st.markdown(_candidate_score_detail_html(row), unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='evidence-panel'>"
+                    f"<div class='evidence-label'>依据说明</div><div>{escape(basis or summary or '未记录明确依据')}</div>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def _render_distribution_panel(rows: pd.DataFrame, representatives: pd.DataFrame) -> None:
@@ -360,8 +362,6 @@ def _candidate_identity_html(row: pd.Series) -> str:
 
 def _candidate_score_html(row: pd.Series) -> str:
     score = safe_float(row.get("rules_score", 0))
-    hydrophobicity = safe_float(row.get("rules_h_region_max_hydrophobicity", 0))
-    n_positive = safe_int_from_float(row.get("rules_n_region_positive_count", 0))
     uspnet = escape(str(row.get("uspnet_prediction_label", "")) or "未运行")
     cleavage = escape(str(row.get("uspnet_cleavage_sequence", "")) or "未给出切割片段")
     score_width = max(0, min(100, score))
@@ -369,11 +369,18 @@ def _candidate_score_html(row: pd.Series) -> str:
         "<div class='score-block'>"
         "<div class='score-row'><span>规则分数</span><strong>"
         f"{score:.0f}</strong></div><div class='score-track'><div class='score-fill' style='width:{score_width:.0f}%;'></div></div>"
-        f"<div class='mini-grid'><div><span>N 区正电</span><strong>{n_positive}</strong></div>"
-        f"<div><span>H 区疏水</span><strong>{hydrophobicity:.2f}</strong></div></div>"
         f"<div class='muted-line'>{uspnet}</div>"
         f"<div class='muted-line'>切割片段：{cleavage}</div>"
         "</div>"
+    )
+
+
+def _candidate_score_detail_html(row: pd.Series) -> str:
+    hydrophobicity = safe_float(row.get("rules_h_region_max_hydrophobicity", 0))
+    n_positive = safe_int_from_float(row.get("rules_n_region_positive_count", 0))
+    return (
+        f"<div class='mini-grid'><div><span>N 区正电</span><strong>{n_positive}</strong></div>"
+        f"<div><span>H 区疏水</span><strong>{hydrophobicity:.2f}</strong></div></div>"
     )
 
 

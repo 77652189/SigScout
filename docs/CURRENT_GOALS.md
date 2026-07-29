@@ -11,10 +11,11 @@
 - 六个 Phase 期间 `python -m pytest -q` 全程 53/53 通过，没有新增测试（重构不改变行为，本来就不需要新测试；唯一的测试覆盖缺口仍是 UI 层，见下方"已知的坑"）。
 - **UX 改善计划启动（2026-07-29）**：代码重构结束后做了一次全局复盘——功能上已对齐 [REQUIREMENTS.md](REQUIREMENTS.md) 全部 10 项能力，判定"功能已足够完善"；用户据此定下下一阶段目标：易用性/UI 布局/学习成本。计划分三步：A 低风险清理 → B 信息层次重设计 → C 导航/引导重设计，一步一步做，每步都等明确同意再继续。计划全文见 `.claude/plans/merry-forging-aurora.md`（本地，未纳入 git）。
 - **Phase A 已完成（2026-07-29）**：(1) 去掉 4 处暴露给用户的本地绝对路径（`screening.py`/`fusion_localization.py`×2/`experimental_feedback.py`）；(2) 融合构建里几个"同批次所有构建共用、和候选无关"的字段（`processing_site_note`、`has_er_retention_motif`、`b_ends_with_kex2_site`、`b_pre_region_like`、`processing_quality`）之前被当成每行/每卡片都重复展示（422 个构建卡片各展示一遍完全相同的文字），现在改成生成/导入结果后只展示一次的汇总说明，两个预览表也去掉了这几列；(3) 统一了几处不一致的措辞（"相似组"→"相似分组"、"代表候选"→"代表序列"、实验状态 untested/measured/result_missing 各自 2-4 种不同标签→每个状态一个标准标签）。`compileall`/`pytest`（53/53）全绿，手动过了一遍受影响的页面（筛选页、融合定位两个子页、代表序列候选浏览、OPN 实验视图），确认路径不再出现、汇总说明正确按批次去重展示、术语统一生效，没有信息丢失。
+- **Phase B 已完成（2026-07-29）**：(1) 候选卡片（`representatives.py`）把"依据说明"证据文本和 N区/H区 mini-grid 收进折叠的 `st.expander("评分细节与依据说明")`，头条只留路线徽章/证据徽章/规则分数条；(2) 融合构建卡片（`fusion_localization.py`）把 Phase A 后剩下的 4 格 mini-grid（定位概率分/A细节分/来源证据/膜液泡风险）收进 `st.expander("评分细节")`，4 个 `st.metric` 头条不变；(3) 筛选页 7 个指标（`screening.py`）从一行铺开改成三段漏斗分组：候选发现与去重 → 规则/USPNet 打分复核 → 相似聚类与代表序列；(4) 分页控件（`_shared.py:_render_pagination_controls`）把"跳转页"输入框和单独的"跳转"按钮合并成一个 `on_change` 触发的 number_input，从 7 个控件减到 6 个（原计划写的是"减到 5 个"，实际去掉"跳转"按钮这一个后是 6 个——"第一页/最后一页"两个快捷按钮翻页多时仍有用，没有一并去掉，执行时判断不值得为了凑数字牺牲功能）。`compileall`/`pytest`（53/53）全绿，手动展开验证了候选卡片和构建卡片的折叠区，确认里面的数值/文本和折叠前完全一致，没有信息丢失。
 
 ## 下一步
 
-1. **UX 计划 Phase B（信息层次重设计）待你确认后开始**：候选卡片/构建卡片把次要诊断细节收进 `st.expander`，只保留一个明确的头部结论；筛选页 7 个指标按漏斗顺序分组；简化 `_render_pagination_controls` 的 7 个控件。细节见 `.claude/plans/merry-forging-aurora.md` Phase B。
+1. **UX 计划 Phase C（导航/引导重设计）待你确认后开始**：把 `ui/streamlit_app.py:main()` 里手写的两级 `st.sidebar.radio` 换成 Streamlit 原生 `st.navigation`/`st.Page`（已确认可用，本机装的是 Streamlit 1.56.0，早过 1.36 的最低要求）；加一个可关闭、记在 `st.session_state` 里的首次使用引导面板，讲清楚"筛选→代表序列→融合定位→实验反馈"这条流水线。这是三步里改动面最大的一步（要动入口文件和每个 `render_*` 函数的签名），需要和拆 `ui/pages/` 时一样做改前/改后的完整人工点击对比。细节见 `.claude/plans/merry-forging-aurora.md` Phase C。
 2. **五个 Phase 一致的教训**：写执行计划时凭经验列出的清单，动手前必须用代码里的真实依赖关系（以及目标框架的实际运行行为，Phase 1 才发现这一层）去核实，不能直接当真——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 开头的"跨 Phase 通用教训"。
 3. **顺带发现、还没处理的可选清理项**（都不在已完成 Phase 的范围内，只是顺带记录）：
    - `screening.py` 里现在最长的方法是 `annotate_persisted_source_proteins`（74 行）。

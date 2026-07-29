@@ -308,7 +308,7 @@ def _render_pagination_controls(
     start = ((current_page - 1) * page_size) + 1 if total_items else 0
     end = min(current_page * page_size, total_items)
 
-    cols = st.columns([0.9, 0.9, 1.1, 1.5, 0.8, 0.9, 0.9])
+    cols = st.columns([0.9, 0.9, 1.1, 1.1, 0.9, 0.9])
     cols[0].button(
         "第一页",
         key=f"{key_prefix}_first",
@@ -329,27 +329,23 @@ def _render_pagination_controls(
     )
     jump_key = f"{key_prefix}_jump"
     cols[3].number_input(
-        "跳转页",
+        "跳转到",
         min_value=1,
         max_value=total_pages,
         value=current_page,
         step=1,
         key=jump_key,
-    )
-    cols[4].button(
-        "跳转",
-        key=f"{key_prefix}_go",
-        on_click=_set_page_from_widget,
+        on_change=_set_page_from_widget,
         args=(page_key, jump_key, total_pages),
     )
-    cols[5].button(
+    cols[4].button(
         "下一页",
         key=f"{key_prefix}_next",
         disabled=current_page >= total_pages,
         on_click=_set_page,
         args=(page_key, current_page + 1),
     )
-    cols[6].button(
+    cols[5].button(
         "最后一页",
         key=f"{key_prefix}_last",
         disabled=current_page >= total_pages,

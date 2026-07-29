@@ -517,8 +517,8 @@ def _render_fusion_sequence_card(row: pd.Series) -> None:
         header_cols[3].metric("可溶概率", _format_number(row.get("external_soluble_probability")))
         header_cols[4].metric("膜风险", _format_number(row.get("external_membrane_probability")))
 
-        score_html = _fusion_score_strip(row)
-        st.markdown(score_html, unsafe_allow_html=True)
+        with st.expander("评分细节"):
+            st.markdown(_fusion_score_strip(row), unsafe_allow_html=True)
 
         st.text_area(
             "融合蛋白序列",

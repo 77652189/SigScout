@@ -82,14 +82,20 @@ def render_help() -> None:
 
 def _render_summary(result: SignalPeptideScreeningResult) -> None:
     summary = result.summary
-    cols = st.columns(7)
-    cols[0].metric("UniProt 初始命中", int(summary.get("uniprot_initial_hits", 0)))
-    cols[1].metric("去重候选", int(summary.get("deduplicated_candidates", 0)))
-    cols[2].metric("重复记录", int(summary.get("uniprot_duplicate_count", 0)))
-    cols[3].metric("规则高优先", int(summary.get("rules_high_priority", 0)))
-    cols[4].metric("USPNet 通过", int(summary.get("uspnet_passed", 0)))
-    cols[5].metric("相似分组", int(summary.get("similarity_group_count", 0)))
-    cols[6].metric("代表序列", int(summary.get("representative_candidate_count", 0)))
+    st.caption("筛选流程：候选发现与去重 → 规则/USPNet 打分复核 → 相似聚类与代表序列")
+    st.caption("候选发现与去重")
+    discover_cols = st.columns(3)
+    discover_cols[0].metric("UniProt 初始命中", int(summary.get("uniprot_initial_hits", 0)))
+    discover_cols[1].metric("去重候选", int(summary.get("deduplicated_candidates", 0)))
+    discover_cols[2].metric("重复记录", int(summary.get("uniprot_duplicate_count", 0)))
+    st.caption("规则 / USPNet 打分复核")
+    score_cols = st.columns(2)
+    score_cols[0].metric("规则高优先", int(summary.get("rules_high_priority", 0)))
+    score_cols[1].metric("USPNet 通过", int(summary.get("uspnet_passed", 0)))
+    st.caption("相似聚类与代表序列")
+    cluster_cols = st.columns(2)
+    cluster_cols[0].metric("相似分组", int(summary.get("similarity_group_count", 0)))
+    cluster_cols[1].metric("代表序列", int(summary.get("representative_candidate_count", 0)))
     query_at = str(summary.get("uniprot_query_at") or summary.get("query_at") or "").strip()
     if query_at:
         st.caption(f"UniProt 查询时间：{query_at}")
