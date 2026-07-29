@@ -1,6 +1,6 @@
 # SigScout 执行计划：拆分重构
 
-维护说明：这是**可勾选、可执行**的计划文档，对应 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-07-28 审计条目。做完一个 Phase 就把对应的 `[ ]` 改成 `[x]`，并在该 Phase 末尾补一行"完成于 commit `xxxxxxx`"。
+维护说明：这是**可勾选、可执行**的计划文档，对应 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-07-28 审计条目。**全部 6 个 Phase（0/4/3/2/1/5）已于 2026-07-29 完成**，这份文档现在是拆分重构的历史记录 + 经验教训，不再是待办清单。以后如果要对这几个模块做新一轮拆分，先看下面"跨 Phase 的通用教训"。
 
 ## 通用约束（每个 Phase 都要遵守）
 
@@ -10,9 +10,9 @@
 - 每个 Phase 建议单独提交，commit message 用 `refactor(...): ...`，方便出问题时单独回滚某一步。
 - 涉及 README/`docs/` 里目标蛄白名称的部分，本计划不改 README 内容，只改代码结构，不触发 [REQUIREMENTS.md](REQUIREMENTS.md) 第 5 节的脱敏边界。
 
-推荐顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放最后，Phase 5 是决策项不是纯执行项）。Phase 0、4、3、2、1 已全部完成，只剩 Phase 5（决策项，不是纯执行项）。
+实际执行顺序：**0 → 4 → 3 → 2 → 1 → 5**（先做风险最低、最独立的，UI 拆分放倒数第二，Phase 5 是决策项放最后）。
 
-**跨 Phase 的通用教训**：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`）；Phase 2 发现计划漏掉了 `choose_representative` 的三个隐藏私有依赖，同时发现计划里点名要改的三个文件实际全仓库 grep 后都不需要改；**Phase 1 发现了一类新的坑——目录命名可能和目标框架自身的约定冲突**（新建的 `ui/pages/` 撞上了 Streamlit 内置的多页面应用自动发现机制，被自动加了一份多余的导航列表），这种问题只有真正启动应用才能发现，`pytest`/`compileall` 完全测不出来。五次都证明了同一件事：写执行计划时凭经验列出的清单，动手前必须用代码里的真实依赖关系（以及目标框架的实际运行行为）去核实，不能直接当真。
+**跨 Phase 的通用教训**：不要只按函数名去重/拆分，先读完整函数体、画出跨函数调用关系再动手——Phase 0 发现同名的 `_safe_int` 其实有两种不兼容行为；Phase 4 发现按计划拆分会形成循环 import；Phase 3 发现"留在原文件的函数"反过来调用"要搬走的函数"（`_construct_row` 调 `score_construct`）；Phase 2 发现计划漏掉了 `choose_representative` 的三个隐藏私有依赖，同时发现计划里点名要改的三个文件实际全仓库 grep 后都不需要改；Phase 1 发现了一类新的坑——目录命名可能和目标框架自身的约定冲突（新建的 `ui/pages/` 撞上了 Streamlit 内置的多页面应用自动发现机制），这种问题只有真正启动应用才能发现，`pytest`/`compileall` 完全测不出来；**Phase 5 反过来是个好消息版本的同一个教训**——决策定下来之后，全仓库 grep 确认没有任何调用方需要跟着改，"计划以为要改一堆调用方"这件事本身也需要用真实搜索结果核实，不能假设。六个 Phase 都证明了同一件事：写执行计划时凭经验列出的清单，动手前必须用代码里的真实依赖关系（以及目标框架的实际运行行为）去核实，不能直接当真——无论核实结果是"比想的更麻烦"还是"比想的更简单"。
 
 ---
 
@@ -132,23 +132,31 @@ Streamlit 有一个内置的多页面应用（multi-page app）功能：只要�
 
 ---
 
-## Phase 5 — `services/__init__.py` 的导入契约（决策项，非纯执行项）
+## Phase 5 — `services/__init__.py` 的导入契约 ✅ 完成于 2026-07-29（选定方案 B）
 
-现状：`services/__init__.py` 的 `__all__` 已经和实际用法脱节（`ui/streamlit_app.py`、`ui/experimental_browser.py` 一直在绕过它直接 import 子模块）。需要二选一，**这是需要你决定的方向，不是我能替你定的**：
+现状（决策前）：`services/__init__.py` 的 `__all__` 已经和实际用法脱节（`ui/streamlit_app.py`、`ui/experimental_browser.py` 一直在绕过它直接 import 子模块）。二选一，**由用户决定的方向**：
 
-- **方案 A**：把 `services/__init__.py` 修成唯一入口——补齐所有缺失的重导出（`score_construct`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、experimental_feedback 系列函数、`DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE` 等），并把 Phase 1-4 之后所有 UI/CLI 的 import 都改成从 `sigscout.services` 导入，不直接碰子模块。
-- **方案 B**：放弃 `__init__.py` 的精选重导出，只保留必要的包初始化，所有调用方直接 `from sigscout.services.xxx import yyy`（即 `experimental_browser.py` 已经在用的风格）。
+- 方案 A：把 `services/__init__.py` 修成唯一入口，补齐所有缺失的重导出，把所有 UI/CLI 的 import 都改成从 `sigscout.services` 导入。
+- **方案 B（已选定）**：放弃 `__init__.py` 的精选重导出，只保留必要的包初始化，所有调用方直接 `from sigscout.services.xxx import yyy`。
 
-- [ ] 决定方案 A 或 B。
-- [ ] 按决定的方案统一改完所有调用方。
-- [ ] 跑 `python -m pytest -q`。
+- [x] 决定方案：**B**。
+- [x] 按方案 B 改完所有调用方。
+- [x] 跑 `python -m pytest -q`。
+
+**执行发现：全仓库 grep 确认没有任何调用方需要改。** 搜索 `from sigscout.services import` 和 `sigscout.services.` 两种写法后发现：`tests/`、`cli.py`、`ui/_shared.py`、`ui/views/*.py`、`ui/experimental_browser.py`，以及 `services/` 内部所有跨子模块引用，全部已经是 `from sigscout.services.具体子模块 import 具体符号` 的写法——没有任何地方通过 `sigscout.services`（包级别）导入过东西。也就是说 `services/__init__.py` 里那份精选重导出列表，从头到尾都没有真正的消费者，纯粹是摆设，跟哪个 Phase 拆没拆都无关。
+
+执行内容：把 `services/__init__.py` 的全部重导出和 `__all__` 删掉，换成一行注释说明"为什么故意留空"（防止以后有人看到空文件觉得是遗漏，顺手把重导出加回去）。跑 `python -m compileall`/`python -m pytest -q`（53/53）/`python -m sigscout.cli --help` 都正常；额外启动了一次 Streamlit 确认页面正常加载，无 console 报错。
+
+风险：低，已验证——这是全流程里改动最小的一个 Phase。
 
 ---
 
-## 完成标准（全部 Phase 做完后）
+## 完成标准 ✅ 全部达成（2026-07-29）
 
-- [ ] `python -m pytest -q` 全绿。
-- [ ] `python -m compileall src tests sigscout` 无报错。
-- [ ] 手动跑一遍 Streamlit 四个导航页无异常。
-- [ ] 重新跑一次 codebase-memory-mcp 的 `get_architecture`/`query_graph` 审计，确认最大文件行数、重复辅助函数数量都下降，更新 [ARCHITECTURE.md](ARCHITECTURE.md) 里的行数表格和已知问题清单。
-- [ ] 在 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 补一条"拆分完成"记录，并同步更新 codebase-memory-mcp 里的 ADR（`manage_adr(mode="update")`）。
+- [x] `python -m pytest -q` 全绿（53/53，全程六个 Phase 都保持绿）。
+- [x] `python -m compileall src tests sigscout` 无报错。
+- [x] 手动跑 Streamlit 全部 4 个导航项、10 个子页无异常（Phase 1 前后各做过一次完整基线比对；Phase 5 后又单独确认过一次启动无误）。
+- [x] 重新跑 codebase-memory-mcp 索引，确认最大文件行数、重复辅助函数数量都下降——见 [ARCHITECTURE.md](ARCHITECTURE.md) 各章节的行数表格和已知问题清单，已随每个 Phase 同步更新。
+- [x] [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 补了变更记录，codebase-memory-mcp 里的 ADR（`manage_adr`）每个 Phase 完成后都同步更新过。
+
+**拆分重构计划到此结束。** 后续如果代码库继续增长、又出现新的过大文件/耦合问题，参照这份文档的方法论重新走一遍流程（审计 → 画依赖图 → 分 Phase 执行 → 每步验证 → 更新文档），不需要照搬这里的具体 Phase 编号。

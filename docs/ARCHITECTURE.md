@@ -1,6 +1,6 @@
 # SigScout 架构文档
 
-维护说明：这份文档描述**当前代码的实际结构**（截至 2026-07-29，Phase 0/4/3/2/1 均已完成，只剩 Phase 5 待决策），不是理想状态。理想状态与差距见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)；变更历史见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md)。行数/依赖数据来自 codebase-memory-mcp 图索引和实际代码核对，若代码已变化，以实际代码为准。
+维护说明：这份文档描述**当前代码的实际结构**（截至 2026-07-29，[EXECUTION_PLAN.md](EXECUTION_PLAN.md) 里的全部 6 个 Phase 均已完成），不是理想状态——理想状态已经和现状基本一致，剩余的已知问题记在各章节和 [CURRENT_GOALS.md](CURRENT_GOALS.md) 里。变更历史见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md)。行数/依赖数据来自 codebase-memory-mcp 图索引和实际代码核对，若代码已变化，以实际代码为准。
 
 ## 1. 分层总览
 
@@ -20,7 +20,7 @@ flowchart TD
     SERVICES --> DATA
 ```
 
-**服务层内部耦合**：`services/__init__.py` 的 `__all__` 和实际用法脱节——它缺 `score_construct`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、`DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE`、experimental_feedback 的导出等，UI 层（Phase 1 之后也一样）一直是直接 `from sigscout.services.xxx import yyy` 绕过它。这条不一致在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5 里作为未决问题记录，还没有解决——需要用户决定是把 `__init__.py` 修成唯一入口，还是干脆放弃这层封装。
+**服务层内部耦合（已解决）**：`services/__init__.py` 曾经是一份精选重导出（`__all__`），但和实际用法早就脱节——它缺 `score_construct`、`FusionTargetPreset`/`FUSION_TARGET_PRESETS`、`DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE`、experimental_feedback 的导出等，全代码库（UI/CLI/services 内部互相引用/tests）一直是直接 `from sigscout.services.xxx import yyy` 绕过它，从没人真正用过包级入口。[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5 里把这个问题摆到台面上让用户决策，用户选择了方案 B——放弃这层封装：全仓库 grep 确认零消费者依赖包级导入后，`services/__init__.py` 被清空为一份说明性注释（6 行），统一改为直接从子模块 import。现在 `services/__init__.py` 不再是"应该同步但没同步"的重导出层，而是刻意留空的。
 
 ## 2. 入口层
 
@@ -70,7 +70,7 @@ flowchart TD
 | `experimental_feedback.py` | 244 | 解析/加载/保存湿实验测量 CSV（`ExperimentalFeedbackResult`）、`prepare_experimental_feedback` 校验与类型转换、`summarize_experimental_feedback` | 新增（本次推送） |
 | `experimental_evidence.py` | 199 | `annotate_candidate_experimental_evidence`/`annotate_construct_experimental_evidence`/`build_target_experimental_candidates`：按精确清洗后的氨基酸序列把反馈行匹配回候选/构建 | 新增（本次推送） |
 | `experimental_exploration.py` | 226 | `build_experiment_guided_exploration`：用已测数据的正/中/低表现锚点，通过 Levenshtein 序列相似度给未测候选打分，四通道配额选面板（正向邻域/通用预测强/多样性/低表现对照） | 曾经仅为借用 `signal_peptide_identity` 就 `import` 整个 `screening.py`；Phase 2 已修复，现在依赖 `similarity.py` |
-| `__init__.py` | 49 | 精选重导出（见第 1 节的不一致说明） | |
+| `__init__.py` | 6（[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5 完成，原 49 行精选重导出） | 刻意留空，只有一段说明性注释，指向应该 import 的子模块写法 | 见第 1 节的耦合解决说明 |
 
 **已知命名残留**：实验反馈闭环目前的路径/键名是**单目标硬编码**的——`ui/views/experimental_feedback.py`/`ui/views/fusion_localization.py` 里读取的固定路径是 `local_runs/experimental_feedback/opn_measurements.csv`，`target_key="opn"` 是字面量；`ui/experimental_browser.py` 的函数名是 `render_opn_experimental_browser`，session key 是 `fusion_selected_candidate_ids_opn`。而同一次推送刚把 `fusion_constructs.py` 从单目标改成了 `FUSION_TARGET_PRESETS` 多目标注册表。也就是说：**融合构建已经多目标化，但实验反馈闭环还没有跟上**——如果以后要给第二个目标蛋白接入湿实验数据，这些硬编码路径/键名会先炸。这是一个具体的"坑"，记录在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 里跟踪。
 
