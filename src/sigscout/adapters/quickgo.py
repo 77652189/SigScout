@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Iterable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from sigscout.core.coercion import now_iso, safe_int
 
 
 QUICKGO_BASE_URL = "https://www.ebi.ac.uk/QuickGO/services"
@@ -39,7 +40,7 @@ class QuickGOAnnotationSource:
         clean_accessions = sorted({str(accession).strip() for accession in accessions if str(accession).strip()})
         annotations: dict[str, list[dict[str, object]]] = {accession: [] for accession in clean_accessions}
         errors: list[str] = []
-        query_at = _now_iso()
+        query_at = now_iso()
         for batch in _chunks(clean_accessions, self.batch_size):
             try:
                 batch_annotations = self._fetch_annotation_batch(batch)
@@ -128,7 +129,7 @@ class QuickGOAnnotationSource:
             payload = self._get_json(url)
             all_results.extend(payload.get("results", []))
             page_info = payload.get("pageInfo", {})
-            total_pages = _safe_int(page_info.get("total")) or 1
+            total_pages = safe_int(page_info.get("total")) or 1
             page += 1
         return all_results
 
@@ -171,12 +172,3 @@ def _chunks(values: list[str], size: int) -> Iterable[list[str]]:
         yield values[index : index + size]
 
 
-def _safe_int(value: object) -> int:
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")

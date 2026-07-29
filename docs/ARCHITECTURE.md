@@ -68,16 +68,9 @@ flowchart TD
 - `data/source_protein_route_map.json`：来源蛋白路线判定规则（GO 祖先 ID、UniProt SL ID、feature type、证据代码分级），数据驱动，改规则不用改代码。当前 `version: "2026-07-24"`。
 - `local_runs/`：运行期输出（UniProt 候选、筛选结果、融合构建、实验反馈 CSV 等），Git 忽略。
 
-## 7. 跨文件重复（不是"发现即修"，是记录给重构用）
+## 7. 跨文件重复 — ✅ 已在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0 收敛
 
-以下小工具函数在多个文件里各自重新实现了一遍，尚未收敛到共享模块：
-
-| 函数 | 出现位置 |
-|---|---|
-| `_safe_int` / `_safe_float` | `fusion_constructs.py`、`streamlit_app.py`、`adapters/uniprot.py`、`adapters/quickgo.py`（4 处） |
-| `_now_iso` | `screening.py`、`source_protein_annotation.py`、`adapters/quickgo.py`（3 处） |
-| `_truthy` | `fusion_constructs.py`、`experimental_exploration.py`（2 处） |
-| `_json_dumps` | `source_protein_annotation.py`、`adapters/uniprot.py`（2 处） |
+原先分散重复的小工具函数（`_safe_int`/`_safe_float`/`_truthy`/`_now_iso`/`_json_dumps`，以及执行时额外发现的 `screening.py: _coerce_bool`/`_safe_int_value`）已统一收敛到 `src/sigscout/core/coercion.py`（`truthy`/`safe_int`/`safe_int_from_float`/`safe_float`/`now_iso`/`json_dumps`）。执行细节、发现的行为差异（`_safe_int` 实际有严格版/宽松版两种不兼容行为）见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0。
 
 ## 8. 测试布局
 

@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
+from sigscout.core.coercion import safe_float, safe_int_from_float, truthy
 from sigscout.core.models import AA_PATTERN
 
 
@@ -243,34 +244,34 @@ def summarize_localization(row: dict[str, object]) -> dict[str, object]:
     membrane_type_text = " ".join(
         str(row.get(key, "")) for key in ("deeploc_membrane_types", "busca_membrane_types")
     ).lower()
-    extracellular_score = max(_safe_float(row.get("deeploc_extracellular")), _safe_float(row.get("busca_extracellular")))
+    extracellular_score = max(safe_float(row.get("deeploc_extracellular")), safe_float(row.get("busca_extracellular")))
     er_golgi_score = max(
-        _safe_float(row.get("deeploc_endoplasmic_reticulum")),
-        _safe_float(row.get("deeploc_golgi_apparatus")),
-        _safe_float(row.get("busca_endoplasmic_reticulum")),
-        _safe_float(row.get("busca_golgi_apparatus")),
+        safe_float(row.get("deeploc_endoplasmic_reticulum")),
+        safe_float(row.get("deeploc_golgi_apparatus")),
+        safe_float(row.get("busca_endoplasmic_reticulum")),
+        safe_float(row.get("busca_golgi_apparatus")),
     )
     membrane_score = max(
-        _safe_float(row.get("deeploc_cell_membrane")),
-        _safe_float(row.get("deeploc_transmembrane")),
-        _safe_float(row.get("deeploc_lipid_anchor")),
-        _safe_float(row.get("busca_cell_membrane")),
-        _safe_float(row.get("busca_transmembrane")),
-        _safe_float(row.get("busca_lipid_anchor")),
+        safe_float(row.get("deeploc_cell_membrane")),
+        safe_float(row.get("deeploc_transmembrane")),
+        safe_float(row.get("deeploc_lipid_anchor")),
+        safe_float(row.get("busca_cell_membrane")),
+        safe_float(row.get("busca_transmembrane")),
+        safe_float(row.get("busca_lipid_anchor")),
     )
-    vacuole_score = max(_safe_float(row.get("deeploc_lysosome_vacuole")), _safe_float(row.get("busca_lysosome_vacuole")))
-    soluble_score = max(_safe_float(row.get("deeploc_soluble")), _safe_float(row.get("busca_soluble")))
+    vacuole_score = max(safe_float(row.get("deeploc_lysosome_vacuole")), safe_float(row.get("busca_lysosome_vacuole")))
+    soluble_score = max(safe_float(row.get("deeploc_soluble")), safe_float(row.get("busca_soluble")))
     return {
         "external_secreted_signal": _contains_any(localization_text, ("extracellular", "secreted", "outside"))
         or extracellular_score >= DEEPLOC_THRESHOLDS["extracellular"],
         "external_er_golgi_signal": _contains_any(localization_text, ("endoplasmic reticulum", "golgi", "secretory pathway"))
-        or _safe_float(row.get("deeploc_endoplasmic_reticulum")) >= DEEPLOC_THRESHOLDS["endoplasmic_reticulum"]
-        or _safe_float(row.get("deeploc_golgi_apparatus")) >= DEEPLOC_THRESHOLDS["golgi_apparatus"],
+        or safe_float(row.get("deeploc_endoplasmic_reticulum")) >= DEEPLOC_THRESHOLDS["endoplasmic_reticulum"]
+        or safe_float(row.get("deeploc_golgi_apparatus")) >= DEEPLOC_THRESHOLDS["golgi_apparatus"],
         "external_membrane_risk": _contains_any(localization_text, ("plasma membrane", "cell membrane"))
         or _contains_any(membrane_type_text, ("transmembrane", "lipid anchor", "lipid-anchored"))
-        or _safe_float(row.get("deeploc_cell_membrane")) >= DEEPLOC_THRESHOLDS["cell_membrane"]
-        or _safe_float(row.get("deeploc_transmembrane")) >= DEEPLOC_THRESHOLDS["transmembrane"]
-        or _safe_float(row.get("deeploc_lipid_anchor")) >= DEEPLOC_THRESHOLDS["lipid_anchor"],
+        or safe_float(row.get("deeploc_cell_membrane")) >= DEEPLOC_THRESHOLDS["cell_membrane"]
+        or safe_float(row.get("deeploc_transmembrane")) >= DEEPLOC_THRESHOLDS["transmembrane"]
+        or safe_float(row.get("deeploc_lipid_anchor")) >= DEEPLOC_THRESHOLDS["lipid_anchor"],
         "external_vacuole_risk": _contains_any(localization_text, ("vacuole", "lysosome", "lysosomal"))
         or vacuole_score >= DEEPLOC_THRESHOLDS["lysosome_vacuole"],
         "external_extracellular_probability": round(extracellular_score, 4),
@@ -284,7 +285,7 @@ def summarize_localization(row: dict[str, object]) -> dict[str, object]:
 def score_construct(row: dict[str, object]) -> dict[str, object]:
     localization = summarize_localization(row)
     construct_type = str(row.get("construct_type", ""))
-    signal_score = _safe_int(row.get("rules_score"))
+    signal_score = safe_int_from_float(row.get("rules_score"))
     if construct_type in {"C_ONLY", "BC"}:
         signal_score = 0
     elif construct_type == "POSITIVE_CONTROL_C" and not signal_score:
@@ -431,32 +432,32 @@ def _processing_score(row: dict[str, object]) -> int:
         score = 55
     elif construct_type == "ABC":
         score = 65
-        if _truthy(row.get("b_ends_with_kex2_site")):
+        if truthy(row.get("b_ends_with_kex2_site")):
             score += 15
-        if _truthy(row.get("b_pre_region_like")):
+        if truthy(row.get("b_pre_region_like")):
             score -= 25
     elif construct_type == "POSITIVE_CONTROL_C":
         score = 75
     else:
         score = 50
-    if _truthy(row.get("has_er_retention_motif")):
+    if truthy(row.get("has_er_retention_motif")):
         score -= 20
-    if _safe_int(row.get("internal_hydrophobic_run_max")) >= 18:
+    if safe_int_from_float(row.get("internal_hydrophobic_run_max")) >= 18:
         score -= 10
     return max(0, min(100, score))
 
 
 def _risk_score(row: dict[str, object], localization: dict[str, object]) -> int:
     score = 0
-    if _truthy(row.get("has_er_retention_motif")):
+    if truthy(row.get("has_er_retention_motif")):
         score += 25
-    if _truthy(row.get("has_vacuolar_sorting_motif")):
+    if truthy(row.get("has_vacuolar_sorting_motif")):
         score += 15
-    if _truthy(row.get("gpi_anchor_like_risk")):
+    if truthy(row.get("gpi_anchor_like_risk")):
         score += 20
-    if _safe_int(row.get("internal_hydrophobic_run_max")) >= 18:
+    if safe_int_from_float(row.get("internal_hydrophobic_run_max")) >= 18:
         score += 20
-    if _safe_float(row.get("low_complexity_fraction")) >= 0.28:
+    if safe_float(row.get("low_complexity_fraction")) >= 0.28:
         score += 10
     if localization["external_membrane_risk"]:
         score += 25
@@ -466,11 +467,11 @@ def _risk_score(row: dict[str, object], localization: dict[str, object]) -> int:
 
 
 def _localization_probability_score(row: dict[str, object], localization: dict[str, object]) -> float:
-    extracellular = _safe_float(localization.get("external_extracellular_probability"))
-    soluble = _safe_float(localization.get("external_soluble_probability"))
-    er_golgi = _safe_float(localization.get("external_er_golgi_probability"))
-    membrane = _safe_float(localization.get("external_membrane_probability"))
-    vacuole = _safe_float(localization.get("external_vacuole_probability"))
+    extracellular = safe_float(localization.get("external_extracellular_probability"))
+    soluble = safe_float(localization.get("external_soluble_probability"))
+    er_golgi = safe_float(localization.get("external_er_golgi_probability"))
+    membrane = safe_float(localization.get("external_membrane_probability"))
+    vacuole = safe_float(localization.get("external_vacuole_probability"))
     score = 15 + extracellular * 55 + soluble * 15 + er_golgi * 10 - membrane * 22 - vacuole * 18
     if _contains_any(str(row.get("deeploc_localization", "")).lower(), ("extracellular", "secreted")):
         score += 8
@@ -480,8 +481,8 @@ def _localization_probability_score(row: dict[str, object], localization: dict[s
 
 
 def _signal_detail_score(row: dict[str, object]) -> float:
-    score = _safe_float(row.get("rules_score")) * 0.45
-    a_length = _safe_int(row.get("a_length"))
+    score = safe_float(row.get("rules_score")) * 0.45
+    a_length = safe_int_from_float(row.get("a_length"))
     if 17 <= a_length <= 30:
         score += 12
     elif 14 <= a_length <= 35:
@@ -489,7 +490,7 @@ def _signal_detail_score(row: dict[str, object]) -> float:
     else:
         score -= 6
 
-    hydrophobicity = _safe_float(row.get("rules_h_region_max_hydrophobicity"))
+    hydrophobicity = safe_float(row.get("rules_h_region_max_hydrophobicity"))
     if 2.0 <= hydrophobicity <= 3.4:
         score += 12
     elif 1.7 <= hydrophobicity <= 3.8:
@@ -497,20 +498,20 @@ def _signal_detail_score(row: dict[str, object]) -> float:
     elif hydrophobicity:
         score -= 5
 
-    n_positive = _safe_int(row.get("rules_n_region_positive_count"))
+    n_positive = safe_int_from_float(row.get("rules_n_region_positive_count"))
     if 1 <= n_positive <= 3:
         score += 8
     elif n_positive > 3:
         score += 3
 
-    if _truthy(row.get("rules_c_region_small_neutral")):
+    if truthy(row.get("rules_c_region_small_neutral")):
         score += 8
     if str(row.get("uspnet_prediction", "")).strip().upper() == "SP":
         score += 8
     if str(row.get("uspnet_cleavage_sequence", "")).strip():
         score += 5
-    if _safe_int(row.get("similar_group_size")) > 1:
-        score += min(6, _safe_int(row.get("similar_group_size")))
+    if safe_int_from_float(row.get("similar_group_size")) > 1:
+        score += min(6, safe_int_from_float(row.get("similar_group_size")))
     return round(max(0, min(100, score)), 1)
 
 
@@ -544,7 +545,7 @@ def _fine_priority_score(
     signal_detail = _signal_detail_score(row)
     source_context = _source_context_score(row)
     processing_score = _processing_score(row)
-    construct_bonus = 4 if str(row.get("construct_type", "")) == "ABC" and _truthy(row.get("b_ends_with_kex2_site")) else 0
+    construct_bonus = 4 if str(row.get("construct_type", "")) == "ABC" and truthy(row.get("b_ends_with_kex2_site")) else 0
     score = (
         overall_score * 0.30
         + localization_detail * 0.30
@@ -555,12 +556,6 @@ def _fine_priority_score(
         - max(0, risk_score - 15) * 0.20
     )
     return round(max(0, min(100, score)), 1)
-
-
-def _truthy(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"true", "1", "yes", "y"}
 
 
 def _max_hydrophobic_run(sequence: str) -> int:
@@ -581,18 +576,6 @@ def _max_residue_fraction(sequence: str) -> float:
     return max(sequence.count(aa) for aa in set(sequence)) / len(sequence)
 
 
-def _safe_int(value: object) -> int:
-    try:
-        return int(float(str(value)))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _safe_float(value: object) -> float:
-    try:
-        return float(str(value))
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _read_delimited_table(text: str) -> tuple[list[dict[str, str]], list[str]]:

@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Iterable
+
+from sigscout.core.coercion import json_dumps, now_iso
 
 
 ANNOTATION_STATUS_PENDING = "未评估"
@@ -92,7 +93,7 @@ def annotate_source_protein_routes(
     return SourceProteinAnnotationResult(
         rows=annotated,
         summary={
-            "source_protein_annotation_run_at": _now_iso(),
+            "source_protein_annotation_run_at": now_iso(),
             "source_protein_annotation_status": ANNOTATION_STATUS_DONE,
             "source_protein_annotation_method": "UniProt controlled locations/features + GO cellular component evidence",
             "source_protein_route_map_version": str(route_map.get("version", "")),
@@ -141,7 +142,7 @@ def annotate_source_protein_route(
         "source_protein_route_basis": basis,
         "source_protein_evidence_summary": summary,
         "source_protein_route_note": _source_route_note(route, evidence_level, basis),
-        "source_protein_quickgo_json": _json_dumps(quickgo),
+        "source_protein_quickgo_json": json_dumps(quickgo),
         "source_protein_quickgo_count": len(quickgo),
         "source_protein_quickgo_query_at": quickgo_query_at or str(row.get("source_protein_quickgo_query_at", "")),
         "source_protein_annotation_status": ANNOTATION_STATUS_DONE,
@@ -428,10 +429,6 @@ def _parse_json_list(value: object) -> list[dict[str, object]]:
     return [item for item in payload if isinstance(item, dict)]
 
 
-def _json_dumps(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
 def _split_values(value: object) -> list[str]:
     return [part.strip() for part in str(value or "").split(";") if part.strip()]
 
@@ -451,5 +448,3 @@ def _go_evidence_prefix(value: str) -> str:
     return text
 
 
-def _now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")

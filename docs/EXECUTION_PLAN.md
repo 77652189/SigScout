@@ -1,6 +1,6 @@
 # SigScout 执行计划：拆分重构
 
-维护说明：这是**可勾选、可执行**的计划文档，对应 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-07-28 审计条目。做完一个 Phase 就把对应的 `[ ]` 改成 `[x]`，并在该 Phase 末尾补一行"完成于 commit `xxxxxxx`"。**截至本文档创建时（2026-07-28），所有 Phase 均未开始。**
+维护说明：这是**可勾选、可执行**的计划文档，对应 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-07-28 审计条目。做完一个 Phase 就把对应的 `[ ]` 改成 `[x]`，并在该 Phase 末尾补一行"完成于 commit `xxxxxxx`"。
 
 ## 通用约束（每个 Phase 都要遵守）
 
@@ -14,17 +14,32 @@
 
 ---
 
-## Phase 0 — 去重共享工具函数
+## Phase 0 — 去重共享工具函数 ✅ 完成于 2026-07-28
 
-- [ ] 新建 `src/sigscout/core/coercion.py`，实现单一版本的 `safe_int`、`safe_float`、`truthy`、`now_iso`、`json_dumps`。
-- [ ] 替换以下重复实现为 import：
-  - `_safe_int`/`_safe_float`：`services/fusion_constructs.py`、`ui/streamlit_app.py`、`adapters/uniprot.py`、`adapters/quickgo.py`
-  - `_now_iso`：`services/screening.py`、`services/source_protein_annotation.py`、`adapters/quickgo.py`
-  - `_truthy`：`services/fusion_constructs.py`、`services/experimental_exploration.py`
-  - `_json_dumps`：`services/source_protein_annotation.py`、`adapters/uniprot.py`
-- [ ] 跑 `python -m pytest -q`。
+- [x] 新建 `src/sigscout/core/coercion.py`：`truthy`、`safe_int`、`safe_int_from_float`、`safe_float`、`now_iso`、`json_dumps`。
+- [x] 替换重复实现为 import。
 
-风险：极低（纯函数，行为不变）。
+**实际执行时和计划有两处出入，记录一下避免以后困惑：**
+
+1. **`_safe_int` 并不是单一实现**——逐个读完函数体后发现两种不同行为混用同一个名字：`adapters/uniprot.py`/`adapters/quickgo.py` 是严格版 `int(str(value))`（`"3.5"` 会失败回退 0）；`ui/streamlit_app.py`/`services/fusion_constructs.py` 是宽松版 `int(float(str(value)))`（`"3.5"` 会得到 3）。这两种行为不等价，为了不改变现有行为，`coercion.py` 里拆成了两个函数——`safe_int`（严格版）和 `safe_int_from_float`（宽松版）——而不是原计划设想的"单一版本 `safe_int`"。
+2. **多找到两个同行为的重复**：`services/screening.py` 的 `_coerce_bool` 和 `fusion_constructs.py`/`experimental_exploration.py` 的 `_truthy` 函数体逐字节相同，一并合并进了 `truthy`；`services/screening.py` 另一个独立函数 `_safe_int_value` 和"宽松版 `_safe_int`"函数体也逐字节相同，一并合并进了 `safe_int_from_float`。原计划的清单里没列这两个（当时只是按名字搜的，没有逐个比较函数体），实际去重范围比计划更彻底一点。
+
+替换后的完整清单：
+
+| 目标函数（`core/coercion.py`） | 原来分散在 |
+|---|---|
+| `truthy` | `fusion_constructs.py: _truthy`、`experimental_exploration.py: _truthy`、`screening.py: _coerce_bool` |
+| `safe_int`（严格版） | `adapters/uniprot.py: _safe_int`、`adapters/quickgo.py: _safe_int` |
+| `safe_int_from_float`（宽松版） | `ui/streamlit_app.py: _safe_int`、`fusion_constructs.py: _safe_int`、`screening.py: _safe_int_value` |
+| `safe_float` | `ui/streamlit_app.py: _safe_float`、`fusion_constructs.py: _safe_float` |
+| `now_iso` | `screening.py: _now_iso`、`source_protein_annotation.py: _now_iso`、`adapters/quickgo.py: _now_iso` |
+| `json_dumps` | `adapters/uniprot.py: _json_dumps`、`source_protein_annotation.py: _json_dumps` |
+
+验证：`python -m compileall src tests sigscout` 通过；`python -m pytest -q` 53/53 通过；对全部 7 个受影响文件做了全量 grep，确认没有残留的旧函数名调用点或定义。
+
+**顺带发现、本 Phase 未处理的问题**（超出去重范围，没有动）：`services/source_protein_annotation.py` 的 `from typing import Iterable` 和 `ui/streamlit_app.py` 导入的 `annotate_candidate_experimental_evidence` 目前都是未使用的 import——是本次 dedup 之前就存在的死代码，跟这次改动无关，顺手记录在这里，之后有人清理死 import 时可以一起处理。
+
+风险：极低（纯函数，行为不变），已验证。
 
 ---
 

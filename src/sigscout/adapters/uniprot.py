@@ -7,6 +7,7 @@ from typing import Iterable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from sigscout.core.coercion import json_dumps, safe_int
 from sigscout.core.models import AA_PATTERN, SignalPeptideCandidate, UniProtCandidateLibraryResult
 
 
@@ -63,7 +64,7 @@ class UniProtSignalPeptideSource:
                 request = Request(next_url, headers={"User-Agent": "SigScout-local/0.1"})
                 with urlopen(request, timeout=30) as response:
                     if not initial_hit_count:
-                        initial_hit_count = _safe_int(response.headers.get("x-total-results"))
+                        initial_hit_count = safe_int(response.headers.get("x-total-results"))
                     payload = json.loads(response.read().decode("utf-8"))
                     items.extend(payload.get("results", []))
                     next_url = _next_link(response.headers.get("Link"))
@@ -241,10 +242,10 @@ def _source_protein_evidence(item: dict) -> dict[str, object]:
         "source_protein_go_evidence": "; ".join(_unique_values(go_terms, "go_evidence")),
         "source_protein_feature_types": "; ".join(_unique_values(features, "type")),
         "source_protein_feature_evidence_codes": "; ".join(_unique_values_from_lists(features, "evidence_codes")),
-        "source_protein_uniprot_location_json": _json_dumps(locations),
-        "source_protein_uniprot_keyword_json": _json_dumps(keywords),
-        "source_protein_uniprot_go_json": _json_dumps(go_terms),
-        "source_protein_uniprot_feature_json": _json_dumps(features),
+        "source_protein_uniprot_location_json": json_dumps(locations),
+        "source_protein_uniprot_keyword_json": json_dumps(keywords),
+        "source_protein_uniprot_go_json": json_dumps(go_terms),
+        "source_protein_uniprot_feature_json": json_dumps(features),
         "source_protein_annotation_status": "未评估",
     }
 
@@ -438,10 +439,6 @@ def _unique_values_from_lists(entries: list[dict[str, object]], key: str) -> lis
     return list(dict.fromkeys(values))
 
 
-def _json_dumps(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
 def _is_reviewed_entry(item: dict) -> bool:
     entry_type = str(item.get("entryType", ""))
     text = entry_type.lower()
@@ -450,13 +447,6 @@ def _is_reviewed_entry(item: dict) -> bool:
 
 def _safe_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()
-
-
-def _safe_int(value: object) -> int:
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return 0
 
 
 def _next_link(link_header: str | None) -> str | None:

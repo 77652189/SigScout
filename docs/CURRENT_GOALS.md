@@ -2,17 +2,17 @@
 
 维护说明：这是**变化最快**的一份文档，只保留"现在在哪、下一步做什么、有什么会绊人的坑"，不重复其他 4 份文档的内容——细节请点链接过去。每次开始一段新的工作前先看这份文档，做完一件事随手更新，不要让它跟实际进度脱节（这份文档本身过时，就是它想防止的那种"坑"）。
 
-## 现在在哪（截至 2026-07-28，commit `a4f68a3`）
+## 现在在哪（截至 2026-07-28）
 
-- 湿实验反馈闭环功能已合并并推送到 `origin/master`（`c8e2d3b`），README 双语已补充说明（`a4f68a3`）。
-- 针对过大文件/重复代码做了一次量化审计，产出了 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 的分阶段拆分方案，**尚未开始执行任何一个 Phase**。
-- 需求/架构/架构变更/执行计划/当前目标 5 份工程文档（也就是本文档所在的 `docs/` 目录）刚建立，纳入 git 提交。
+- 湿实验反馈闭环功能已合并并推送到 `origin/master`（`c8e2d3b`），README 双语已补充说明（`a4f68a3`），需求/架构/架构变更/执行计划/当前目标 5 份工程文档已建立并推送（`02e3756`）。
+- **[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0（去重共享工具函数）已完成**：新增 `src/sigscout/core/coercion.py`，7 个文件里的重复 `_safe_int`/`_safe_float`/`_truthy`/`_now_iso`/`_json_dumps`/`_coerce_bool`/`_safe_int_value` 全部收敛。执行时发现 `_safe_int` 实际混用了两种不兼容行为（严格版/宽松版），拆成了 `safe_int`/`safe_int_from_float` 两个函数，没有强行合一——细节见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 0。53 个测试全部通过。
+- Phase 4/3/2/1/5 尚未开始。
 
 ## 下一步（等待决定，不要自己默认选一个就动手）
 
-1. **要不要现在就开始执行 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)？** 如果要，按文档里的推荐顺序从 Phase 0（去重）开始，风险最低。
+1. **要不要继续执行 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)？** 按推荐顺序下一步是 Phase 4（拆 `source_protein_annotation.py`，风险低）。
 2. **Phase 5 的开放决策**（`services/__init__.py` 到底该不该是唯一导入入口，方案 A/B）需要先定方向，否则 Phase 1-4 拆完之后 import 路径可能要再改一遍。
-3. 如果暂时不做拆分，继续功能开发时，至少留意下面"新功能会撞到的坑"里的第 1、4 条。
+3. 如果暂时不做拆分，继续功能开发时，至少留意下面"已知的坑"里的第 1、4 条。
 
 ## 已知的坑（写代码/改文档前先看一眼）
 
@@ -23,6 +23,7 @@
 5. **仓库根目录有一个未纳入版本控制的 `external.7z`**：不清楚是什么内容、要不要长期保留在工作目录里。如果确认不需要提交，建议加进 `.gitignore` 或直接清理，避免以后有人误以为它该被提交、或者不知道能不能删。**这个由你决定，我没有主动处理。**
 6. **没有 `.gitattributes`，行尾风格依赖每台机器的 `core.autocrlf` 设置**（本机是 `true`）：这是为什么这次会话里几乎每条涉及文件改动的 git 命令都弹 "LF will be replaced by CRLF" 警告。目前不影响功能，但换一台 `autocrlf=false` 的机器协作时可能出现整份文件的行尾 diff 噪音。如果以后要多人协作，值得补一个 `.gitattributes` 固定 `* text=auto`。
 7. **`core/paths.py` 的 `opn_saved_screening_dir` 属性名残留**：命名没跟上多目标化，见 [ARCHITECTURE_CHANGES.md](ARCHITECTURE_CHANGES.md) 2026-06-18 条目。低优先级，顺手改的时候改。
+8. **两个跟 Phase 0 无关的死 import**（执行 Phase 0 时顺带发现，没有处理）：`services/source_protein_annotation.py` 的 `from typing import Iterable`、`ui/streamlit_app.py` 导入的 `annotate_candidate_experimental_evidence`，目前都没有实际用到。低优先级，顺手清理即可。
 
 ## 文档地图
 

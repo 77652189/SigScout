@@ -4,6 +4,7 @@ from collections.abc import Iterable
 
 import pandas as pd
 
+from sigscout.core.coercion import truthy
 from sigscout.services.screening import signal_peptide_identity
 
 
@@ -46,8 +47,8 @@ def build_experiment_guided_exploration(
         medium_identity, medium_anchor = _nearest_anchor(sequence, anchors["medium"])
         low_identity, low_anchor = _nearest_anchor(sequence, anchors["low"])
         rules = _number(row.get("rules_score")) / 100.0
-        consensus = 1.0 if _truthy(row.get("consensus_pass")) else 0.0
-        uspnet = 1.0 if _truthy(row.get("uspnet_pass")) or str(row.get("uspnet_prediction", "")).upper() == "SP" else 0.0
+        consensus = 1.0 if truthy(row.get("consensus_pass")) else 0.0
+        uspnet = 1.0 if truthy(row.get("uspnet_pass")) or str(row.get("uspnet_prediction", "")).upper() == "SP" else 0.0
         source = 1.0 if str(row.get("source_protein_route", "")) in {"分泌/胞外倾向", "分泌通路腔室倾向"} else 0.0
         generic = min(1.0, max(0.0, rules * 0.60 + consensus * 0.20 + uspnet * 0.10 + source * 0.10))
         guided = min(
@@ -223,5 +224,3 @@ def _number(value: object) -> float:
         return 0.0
 
 
-def _truthy(value: object) -> bool:
-    return value is True or str(value).strip().lower() in {"true", "1", "yes", "y"}

@@ -9,6 +9,7 @@ import pandas as pd
 
 from sigscout.adapters.quickgo import QuickGOAnnotationSource
 from sigscout.adapters.uspnet import USPNetAdapter
+from sigscout.core.coercion import now_iso, safe_int_from_float, truthy
 from sigscout.core.models import UniProtCandidateLibraryResult
 from sigscout.services.exports import write_candidate_fasta, write_csv, write_json, write_signal_peptide_fasta
 from sigscout.services.library import SignalPeptideLibraryService
@@ -77,7 +78,7 @@ class SignalPeptideScreeningService:
         reviewed_only: bool = False,
         exclude_existing: bool = True,
     ) -> UniProtCandidateLibraryResult:
-        query_at = _now_iso()
+        query_at = now_iso()
         discovery = self.library_service.discover_uniprot_candidate_library(
             taxon_id=taxon_id,
             max_records=max_records,
@@ -206,7 +207,7 @@ class SignalPeptideScreeningService:
             "reviewed_only": reviewed_only,
             "max_records": max_records,
             "uniprot_query_at": discovery.query_at,
-            "screening_run_at": _now_iso(),
+            "screening_run_at": now_iso(),
             "uniprot_initial_hits": discovery.initial_hit_count,
             "uniprot_fetched_records": discovery.fetched_record_count,
             "uniprot_extracted_signal_count": discovery.extracted_signal_count,
@@ -469,11 +470,11 @@ class SignalPeptideScreeningService:
             rows=rows,
             source_url=str(summary.get("source_url", "local persisted uniprot_candidates.csv")),
             errors=list(summary.get("errors", [])),
-            initial_hit_count=_safe_int_value(summary.get("initial_hit_count", len(rows))),
-            fetched_record_count=_safe_int_value(summary.get("fetched_record_count", len(rows))),
-            extracted_signal_count=_safe_int_value(summary.get("extracted_signal_count", len(rows) + len(duplicate_rows))),
-            deduplicated_count=_safe_int_value(summary.get("deduplicated_count", len(rows))),
-            duplicate_count=_safe_int_value(summary.get("duplicate_count", len(duplicate_rows))),
+            initial_hit_count=safe_int_from_float(summary.get("initial_hit_count", len(rows))),
+            fetched_record_count=safe_int_from_float(summary.get("fetched_record_count", len(rows))),
+            extracted_signal_count=safe_int_from_float(summary.get("extracted_signal_count", len(rows) + len(duplicate_rows))),
+            deduplicated_count=safe_int_from_float(summary.get("deduplicated_count", len(rows))),
+            duplicate_count=safe_int_from_float(summary.get("duplicate_count", len(duplicate_rows))),
             duplicate_rows=duplicate_rows,
             query_at=str(summary.get("query_at", "")),
         )
@@ -627,7 +628,7 @@ def _representative_sort_key(row: dict[str, object]) -> tuple[object, ...]:
         not bool(row.get("consensus_pass")),
         not _uspnet_supports_signal_peptide(row),
         not bool(row.get("rules_high_priority")),
-        -_safe_int_value(row.get("rules_score")),
+        -safe_int_from_float(row.get("rules_score")),
         not _reviewed_or_strong_evidence(row),
         len(str(row.get("signal_peptide_sequence", ""))),
         str(row.get("candidate_id", "")),
@@ -694,10 +695,6 @@ def _with_query_at(discovery: UniProtCandidateLibraryResult, query_at: str) -> U
     )
 
 
-def _now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
 def _read_json_dict(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -737,14 +734,8 @@ def _coerce_row_types(row: dict[str, object]) -> dict[str, object]:
     coerced = dict(row)
     for column in bool_columns:
         if column in coerced:
-            coerced[column] = _coerce_bool(coerced[column])
+            coerced[column] = truthy(coerced[column])
     return coerced
-
-
-def _coerce_bool(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"true", "1", "yes", "y"}
 
 
 def _merge_preserved_source_annotations(
@@ -777,7 +768,7 @@ def _merge_preserved_source_annotations(
 def _ensure_screening_row_defaults(row: dict[str, object]) -> dict[str, object]:
     updated = _coerce_row_types(row)
     updated.setdefault("rules_n_region_negative_count", 0)
-    updated.setdefault("rules_n_region_pass", _safe_int_value(updated.get("rules_n_region_positive_count")) >= 1)
+    updated.setdefault("rules_n_region_pass", safe_int_from_float(updated.get("rules_n_region_positive_count")) >= 1)
     updated.setdefault("rules_h_region_hydrophobic_count", 0)
     updated.setdefault("rules_h_region_pass", float(updated.get("rules_h_region_max_hydrophobicity") or 0) >= 1.8)
     updated.setdefault("rules_c_region_pass", bool(updated.get("rules_c_region_small_neutral")))
@@ -811,15 +802,15 @@ def _discovery_summary_matches(
     exclude_existing: bool,
 ) -> bool:
     return (
-        _safe_int_value(summary.get("taxon_id")) == taxon_id
-        and _safe_int_value(summary.get("max_records")) == max_records
+        safe_int_from_float(summary.get("taxon_id")) == taxon_id
+        and safe_int_from_float(summary.get("max_records")) == max_records
         and bool(summary.get("reviewed_only")) == reviewed_only
         and bool(summary.get("exclude_existing", True)) == exclude_existing
     )
 
 
 def _rules_score_distribution(rows: list[dict[str, object]]) -> dict[str, int]:
-    scores = [_safe_int_value(row.get("rules_score")) for row in rows]
+    scores = [safe_int_from_float(row.get("rules_score")) for row in rows]
     return {
         "rules_score_95_plus": sum(1 for score in scores if score >= 95),
         "rules_score_80_to_94": sum(1 for score in scores if 80 <= score <= 94),
@@ -839,11 +830,6 @@ def _similarity_summary(rows: list[dict[str, object]]) -> dict[str, int]:
     }
 
 
-def _safe_int_value(value: object) -> int:
-    try:
-        return int(float(str(value)))
-    except (TypeError, ValueError):
-        return 0
 
 
 def _rules_score_note(score: int, passed: bool) -> str:

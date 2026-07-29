@@ -14,6 +14,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from sigscout.adapters.uspnet import USPNetAdapter  # noqa: E402
+from sigscout.core.coercion import safe_float, safe_int_from_float  # noqa: E402
 from sigscout.core.paths import ProjectPaths  # noqa: E402
 from sigscout.services.fusion_constructs import (  # noqa: E402
     DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE,
@@ -806,9 +807,9 @@ def _candidate_identity_html(row: pd.Series) -> str:
 
 
 def _candidate_score_html(row: pd.Series) -> str:
-    score = _safe_float(row.get("rules_score", 0))
-    hydrophobicity = _safe_float(row.get("rules_h_region_max_hydrophobicity", 0))
-    n_positive = _safe_int(row.get("rules_n_region_positive_count", 0))
+    score = safe_float(row.get("rules_score", 0))
+    hydrophobicity = safe_float(row.get("rules_h_region_max_hydrophobicity", 0))
+    n_positive = safe_int_from_float(row.get("rules_n_region_positive_count", 0))
     uspnet = escape(str(row.get("uspnet_prediction_label", "")) or "未运行")
     cleavage = escape(str(row.get("uspnet_cleavage_sequence", "")) or "未给出切割片段")
     score_width = max(0, min(100, score))
@@ -833,20 +834,6 @@ def _sequence_html(sequence: str) -> str:
         f"<code>{clean}</code>"
         "</div>"
     )
-
-
-def _safe_float(value: object) -> float:
-    try:
-        return float(str(value))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _safe_int(value: object) -> int:
-    try:
-        return int(float(str(value)))
-    except (TypeError, ValueError):
-        return 0
 
 
 def _render_similar_sequence_details(rows: pd.DataFrame, representatives: pd.DataFrame) -> None:
@@ -1429,7 +1416,7 @@ def _fusion_score_strip(row: pd.Series) -> str:
 
 
 def _format_number(value: object) -> str:
-    number = _safe_float(value)
+    number = safe_float(value)
     if abs(number - round(number)) < 0.05:
         return str(int(round(number)))
     return f"{number:.3f}" if abs(number) < 1 else f"{number:.1f}"
