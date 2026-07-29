@@ -18,7 +18,9 @@
 - `ui/streamlit_app.py` 绕过 `services/__init__.py` 直接 import 5 个 service 子模块；`services/__init__.py` 的 `__all__` 本身也没跟上实际用法。
 - UI 层（`streamlit_app.py`、`experimental_browser.py`）零自动化测试覆盖。
 
-**后果/待办**：详细的分阶段拆分方案见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)，**尚未开始执行**。其中 Phase 5（`services/__init__.py` 到底该不该是唯一导入入口）是一个开放决策，本次审计没有替用户下结论。
+**后果/待办**：详细的分阶段拆分方案见 [EXECUTION_PLAN.md](EXECUTION_PLAN.md)，**审计当时尚未开始执行**。其中 Phase 5（`services/__init__.py` 到底该不该是唯一导入入口）是一个开放决策，本次审计没有替用户下结论。
+
+**后续更新（2026-07-29）**：这份计划已按 0→4→3→2→1→5 的顺序全部执行完毕，Phase 5 选定方案 B（放弃 `__init__.py` 精选重导出，统一从子模块 import）。每个 Phase 的具体执行细节、发现的额外依赖/命名坑，按惯例记在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 而不是本文档（本文档只记"架构层面重大变更"的起点，日常执行看 `git log` 和 EXECUTION_PLAN.md）。
 
 ---
 
