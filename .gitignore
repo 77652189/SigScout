@@ -14,6 +14,7 @@ local_runs/
 external/USPNet/
 externals/USPNet/
 HANDOFF.md
+!docs/HANDOFF.md
 examples/opn/saved_screening/
 .streamlit/*
 !.streamlit/config.toml

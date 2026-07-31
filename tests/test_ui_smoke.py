@@ -6,7 +6,7 @@
 page_* 函数传进去（那样会因为找不到它引用的模块级名字而 NameError）。
 
 这些测试只断言“页面渲染无异常”，不断言具体展示内容——具体数值/交互行为仍然靠
-手动 Streamlit 走查验证（见 docs/CURRENT_GOALS.md 已知的坑）。页面在没有本地筛选
+手动 Streamlit 走查验证（见 docs/HANDOFF.md 的验证方式）。页面在没有本地筛选
 结果/实验数据时会优雅降级成提示信息而不是报错，所以这些测试在全新 checkout（没有
 local_runs/、examples/opn/saved_screening/）上也应该能通过。
 """
