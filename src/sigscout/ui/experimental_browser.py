@@ -13,31 +13,33 @@ from sigscout.services.experimental_feedback import load_experimental_feedback
 from sigscout.services.experimental_exploration import build_experiment_guided_exploration
 
 
-def render_opn_experimental_browser(representatives: pd.DataFrame, local_runs_dir: Path) -> None:
+def render_experimental_browser(representatives: pd.DataFrame, local_runs_dir: Path, target_key: str) -> None:
     result = load_experimental_feedback(
-        local_runs_dir / "experimental_feedback" / "opn_measurements.csv", target_key="opn"
+        local_runs_dir / "experimental_feedback" / f"{target_key}_measurements.csv", target_key=target_key
     )
     if not result.valid:
-        st.warning("OPN 实验反馈暂时无法读取，通用候选不受影响。")
+        st.warning(f"{target_key.upper()} 实验反馈暂时无法读取，通用候选不受影响。")
         return
-    shared = annotate_candidate_experimental_evidence(representatives, result.rows, "opn")
-    additions = build_target_experimental_candidates(result.rows, "opn")
+    shared = annotate_candidate_experimental_evidence(representatives, result.rows, target_key)
+    additions = build_target_experimental_candidates(result.rows, target_key)
     if not additions.empty:
         known = set(shared["signal_peptide_sequence"].astype(str).str.upper())
         additions = additions[~additions["signal_peptide_sequence"].astype(str).str.upper().isin(known)]
         shared = pd.concat([shared, additions], ignore_index=True, sort=False)
     st.caption("精确序列去重；目标专属候选不会写入共享库，实验结果不改变通用预测分。")
-    _render_experimental_decision_summary(shared)
-    _render_guided_exploration(shared)
+    _render_experimental_decision_summary(shared, target_key)
+    _render_guided_exploration(shared, target_key)
     frame = _filter_and_sort(shared)
-    _selection_bar("top")
+    _selection_bar("top", target_key)
     if frame.empty:
         st.info("没有符合当前条件的候选。")
         return
-    page_size = st.slider("每页展示数量", 1, min(50, len(frame)), min(12, len(frame)), key="opn_exp_page_size")
+    page_size_key = f"{target_key}_exp_page_size"
+    page_size = st.slider("每页展示数量", 1, min(50, len(frame)), min(12, len(frame)), key=page_size_key)
     total_pages = max(1, (len(frame) + page_size - 1) // page_size)
-    page = min(int(st.session_state.get("opn_exp_page", 1)), total_pages)
-    _pager(page, total_pages, "top")
+    page_key = f"{target_key}_exp_page"
+    page = min(int(st.session_state.get(page_key, 1)), total_pages)
+    _pager(page, total_pages, "top", target_key)
     start = (page - 1) * page_size
     visible = frame.iloc[start:start + page_size]
     for status, label in (("measured", "已测得候选"), ("result_missing", "结果缺失"), ("untested", "未测试候选")):
@@ -45,17 +47,17 @@ def render_opn_experimental_browser(representatives: pd.DataFrame, local_runs_di
         if rows.empty:
             continue
         st.markdown(f"**{label}**")
-        _cards(rows)
-    _pager(page, total_pages, "bottom")
-    _selection_bar("bottom")
+        _cards(rows, target_key)
+    _pager(page, total_pages, "bottom", target_key)
+    _selection_bar("bottom", target_key)
 
 
-def _render_experimental_decision_summary(frame: pd.DataFrame) -> None:
+def _render_experimental_decision_summary(frame: pd.DataFrame, target_key: str) -> None:
     measured = frame[frame["experimental_status"].astype(str).eq("measured")].copy()
     missing = frame[frame["experimental_status"].astype(str).eq("result_missing")].copy()
     untested = frame[frame["experimental_status"].astype(str).eq("untested")].copy()
     if measured.empty:
-        st.info("当前没有可用于候选决策的 OPN 产量结果。")
+        st.info(f"当前没有可用于候选决策的 {target_key.upper()} 产量结果。")
         return
     measured["_relative"] = pd.to_numeric(
         measured["experimental_relative_median"], errors="coerce"
@@ -121,14 +123,14 @@ def _render_experimental_decision_summary(frame: pd.DataFrame) -> None:
         )
 
 
-def _render_guided_exploration(frame: pd.DataFrame) -> None:
+def _render_guided_exploration(frame: pd.DataFrame, target_key: str) -> None:
     st.markdown("**实验引导探索**")
     cols = st.columns([1.2, 2.3])
     panel_size = cols[0].segmented_control(
         "探索池规模",
         [20, 40, 60],
         default=40,
-        key="opn_exploration_panel_size",
+        key=f"{target_key}_exploration_panel_size",
     )
     cols[1].caption(
         "用短信号肽实验锚点压缩未测试范围；完整 leader 不与短信号肽混算。"
@@ -146,7 +148,8 @@ def _render_guided_exploration(frame: pd.DataFrame) -> None:
     metrics[3].metric("多样性保留", int(channel_counts.get("多样性保留", 0)))
     metrics[4].metric("机制对照", int(channel_counts.get("低表现邻域对照", 0)))
 
-    selected = set(st.session_state.get("fusion_selected_candidate_ids_opn", []))
+    selection_key = f"fusion_selected_candidate_ids_{target_key}"
+    selected = set(st.session_state.get(selection_key, []))
     panel_ids = set(panel["candidate_id"].astype(str))
     action_cols = st.columns([2.4, 1.2])
     action_cols[0].caption(
@@ -155,10 +158,10 @@ def _render_guided_exploration(frame: pd.DataFrame) -> None:
     )
     if action_cols[1].button(
         "将探索池加入融合评估",
-        key=f"add_exploration_panel_{len(panel)}",
+        key=f"add_exploration_panel_{target_key}_{len(panel)}",
         type="primary",
     ):
-        st.session_state["fusion_selected_candidate_ids_opn"] = sorted(selected | panel_ids)
+        st.session_state[selection_key] = sorted(selected | panel_ids)
         st.success(f"已加入 {len(panel_ids)} 个探索候选。")
         st.rerun()
 
@@ -246,8 +249,9 @@ def _filter_and_sort(frame: pd.DataFrame) -> pd.DataFrame:
     ).drop(columns=["_tested_rank", "_relative", "_rules"])
 
 
-def _cards(frame: pd.DataFrame) -> None:
-    selected = set(st.session_state.get("fusion_selected_candidate_ids_opn", []))
+def _cards(frame: pd.DataFrame, target_key: str) -> None:
+    selection_key = f"fusion_selected_candidate_ids_{target_key}"
+    selected = set(st.session_state.get(selection_key, []))
     for _, row in frame.iterrows():
         candidate_id = str(row.get("candidate_id", ""))
         with st.container(border=True):
@@ -256,11 +260,11 @@ def _cards(frame: pd.DataFrame) -> None:
             cols[0].caption(f"{row.get('experimental_unit_type', '')} · {row.get('source_note', '')}")
             if cols[1].button(
                 "移出融合评估" if candidate_id in selected else "加入融合评估",
-                key=f"opn_select_{candidate_id}",
+                key=f"{target_key}_select_{candidate_id}",
                 type="secondary" if candidate_id in selected else "primary",
             ):
                 selected.remove(candidate_id) if candidate_id in selected else selected.add(candidate_id)
-                st.session_state["fusion_selected_candidate_ids_opn"] = sorted(selected)
+                st.session_state[selection_key] = sorted(selected)
                 st.rerun()
             st.code(str(row.get("signal_peptide_sequence", "")), language=None)
             status = str(row.get("experimental_status", ""))
@@ -281,36 +285,38 @@ def _cards(frame: pd.DataFrame) -> None:
             elif status == "result_missing":
                 st.warning("报告提及该序列，但未提供产量，不参与实验排序。")
             else:
-                st.caption("尚无 OPN 实验结果，保留通用预测次序。")
+                st.caption(f"尚无 {target_key.upper()} 实验结果，保留通用预测次序。")
             st.caption(str(row.get("experimental_note", "")))
 
 
-def _selection_bar(position: str) -> None:
-    selected = set(st.session_state.get("fusion_selected_candidate_ids_opn", []))
+def _selection_bar(position: str, target_key: str) -> None:
+    selection_key = f"fusion_selected_candidate_ids_{target_key}"
+    selected = set(st.session_state.get(selection_key, []))
     cols = st.columns([2, 1, 1])
     cols[0].metric("已选融合候选", len(selected))
     with cols[1].popover("查看已选", disabled=not selected):
         for candidate_id in sorted(selected):
             st.write(candidate_id)
-    if cols[2].button("清空", key=f"opn_clear_{position}", disabled=not selected):
-        st.session_state["fusion_selected_candidate_ids_opn"] = []
+    if cols[2].button("清空", key=f"{target_key}_clear_{position}", disabled=not selected):
+        st.session_state[selection_key] = []
         st.rerun()
 
 
-def _pager(page: int, total_pages: int, position: str) -> None:
+def _pager(page: int, total_pages: int, position: str, target_key: str) -> None:
+    page_key = f"{target_key}_exp_page"
     cols = st.columns([1, 1, 2, 1, 1])
-    if cols[0].button("首页", key=f"opn_first_{position}", disabled=page == 1):
-        st.session_state["opn_exp_page"] = 1
+    if cols[0].button("首页", key=f"{target_key}_first_{position}", disabled=page == 1):
+        st.session_state[page_key] = 1
         st.rerun()
-    if cols[1].button("上一页", key=f"opn_prev_{position}", disabled=page == 1):
-        st.session_state["opn_exp_page"] = page - 1
+    if cols[1].button("上一页", key=f"{target_key}_prev_{position}", disabled=page == 1):
+        st.session_state[page_key] = page - 1
         st.rerun()
-    jump = cols[2].number_input("页码", 1, total_pages, page, key=f"opn_jump_{position}")
-    if cols[3].button("跳转", key=f"opn_go_{position}"):
-        st.session_state["opn_exp_page"] = int(jump)
+    jump = cols[2].number_input("页码", 1, total_pages, page, key=f"{target_key}_jump_{position}")
+    if cols[3].button("跳转", key=f"{target_key}_go_{position}"):
+        st.session_state[page_key] = int(jump)
         st.rerun()
-    if cols[4].button("下一页", key=f"opn_next_{position}", disabled=page == total_pages):
-        st.session_state["opn_exp_page"] = page + 1
+    if cols[4].button("下一页", key=f"{target_key}_next_{position}", disabled=page == total_pages):
+        st.session_state[page_key] = page + 1
         st.rerun()
     st.caption(f"第 {page} / {total_pages} 页")
 

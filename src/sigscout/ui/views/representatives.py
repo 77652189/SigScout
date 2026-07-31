@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from sigscout.core.coercion import safe_float, safe_int_from_float
+from sigscout.services.fusion_constructs import FUSION_TARGET_PRESETS
 from sigscout.services.screening import SignalPeptideScreeningResult
 from sigscout.ui._shared import (
     PATHS,
@@ -15,7 +16,7 @@ from sigscout.ui._shared import (
     _render_pagination_controls,
     _sorted_unique,
 )
-from sigscout.ui.experimental_browser import render_opn_experimental_browser
+from sigscout.ui.experimental_browser import render_experimental_browser
 
 
 def page_candidate_browser() -> None:
@@ -53,13 +54,27 @@ def render_representatives(subpage: str = "候选浏览") -> None:
     _render_downloads(result)
 
 
+def _select_experimental_target() -> str:
+    options = list(FUSION_TARGET_PRESETS.keys())
+    current = str(st.session_state.get("fusion_target_key", "opn"))
+    index = options.index(current) if current in options else 0
+    return st.selectbox(
+        "目标蛋白",
+        options,
+        index=index,
+        format_func=lambda key: FUSION_TARGET_PRESETS[key].label,
+        key="fusion_target_key",
+    )
+
+
 def _render_candidate_browser(representatives: pd.DataFrame) -> None:
     mode = st.segmented_control(
-        "浏览模式", ["通用候选", "OPN 实验视图"],
+        "浏览模式", ["通用候选", "目标实验视图"],
         default="通用候选", key="candidate_browser_mode",
     )
-    if mode == "OPN 实验视图":
-        render_opn_experimental_browser(representatives, PATHS.local_runs_dir)
+    if mode == "目标实验视图":
+        target_key = _select_experimental_target()
+        render_experimental_browser(representatives, PATHS.local_runs_dir, target_key)
         return
     filtered = _render_candidate_filters(representatives)
     if filtered.empty:

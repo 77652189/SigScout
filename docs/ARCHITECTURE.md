@@ -34,10 +34,10 @@ flowchart TD
 | `streamlit_app.py` | 64 | sys.path 兼容代码（`streamlit run` 直接执行脚本时让 `sigscout` 包可导入）、`main()`（用 `st.navigation` 定义 4 个分组 × 各自子页面，每个子页面对应一个带图标的 `st.Page`）、`__main__` 守卫。不再包含任何页面渲染逻辑 |
 | `_shared.py` | 371 | 跨页面共用：`PATHS`（`ProjectPaths.discover` 结果）、`st.set_page_config`（模块加载时执行一次）、`_css`、`_local_screening_service`/`_example_screening_service`/`_load_result`/`_load_representative_frames`、`_ensure_display_columns`、`_sorted_unique`、`_render_pagination_controls`（+ `_clamp_page`/`_set_page`/`_set_page_from_widget`）。分页控件 Phase B 后是 6 个（原 7 个，"跳转页"输入框和"跳转"按钮合并成一个 `on_change` 触发的 `number_input`） |
 | `views/screening.py` | 168 | "毕赤酵母信号肽筛选"：`render_screening`（+ `page_screening`/`page_source_annotation` 两个 `st.Page` 用无参包装）、`render_source_protein_annotation`、`render_help`、结果摘要渲染（Phase B 后按漏斗分组展示 7 个指标）、`_render_onboarding_banner`（Phase C 新增，仅在落地页显示的一次性首次使用引导，状态记在 `st.session_state["onboarding_dismissed"]`） |
-| `views/representatives.py` | 420（2026-07-29 删除两个死函数，原 484 行） | "代表序列与下载"：候选浏览（含 OPN 实验视图切换）/证据分布/相似序列/原始数据四个子页（+ 4 个 `page_*` 包装函数）、下载按钮。候选卡片 Phase B 后把 N/H 区细节和依据说明收进 `st.expander` |
-| `views/fusion_localization.py` | 693 | "融合定位"：构建生成面板、DeepLoc/BUSCA 导入、定位缓存、融合序列复制区（+ 2 个 `page_*` 包装函数）——UI 层里最大的文件，因为它同时承接 `fusion_constructs`/`fusion_scoring`/`localization_import`/`experimental_evidence` 四个 service 模块的展示逻辑。Phase A 后新增 `_render_batch_processing_notes`（按批次去重展示 B/C 固定序列相关说明，而不是每个构建卡片重复一遍），Phase B 后构建卡片的评分明细收进 `st.expander` |
-| `views/experimental_feedback.py` | 173 | "实验反馈"：结果展示（顶层导航标签 Phase C 后从"OPN 实验结果"泛化为"实验结果"，页面内部提示文字仍明确说明数据来自 OPN 实验）、CSV 导入与模板（+ `page_experimental_results`/`page_experimental_import` 两个包装函数） |
-| `experimental_browser.py` | 322 | 不属于本次拆分范围（Phase 1 之前就已独立成文件），嵌入 `views/representatives.py` 的"候选浏览"页面，不是独立导航项 |
+| `views/representatives.py` | 420（2026-07-29 删除两个死函数，原 484 行） | "代表序列与下载"：候选浏览（含按目标切换的实验视图，2026-07-31 起浏览模式旁新增目标选择器）/证据分布/相似序列/原始数据四个子页（+ 4 个 `page_*` 包装函数）、下载按钮。候选卡片 Phase B 后把 N/H 区细节和依据说明收进 `st.expander` |
+| `views/fusion_localization.py` | 693 | "融合定位"：构建生成面板、DeepLoc/BUSCA 导入、定位缓存、融合序列复制区（+ 2 个 `page_*` 包装函数）——UI 层里最大的文件，因为它同时承接 `fusion_constructs`/`fusion_scoring`/`localization_import`/`experimental_evidence` 四个 service 模块的展示逻辑。Phase A 后新增 `_render_batch_processing_notes`（按批次去重展示 B/C 固定序列相关说明，而不是每个构建卡片重复一遍），Phase B 后构建卡片的评分明细收进 `st.expander`。2026-07-31 起 `_render_experimental_match_tabs` 的 tab 标签和空态提示按 `target_key.upper()` 模板化，不再硬编码 OPN |
+| `views/experimental_feedback.py` | 173 | "实验反馈"：结果展示（顶层导航标签 Phase C 后从"OPN 实验结果"泛化为"实验结果"；2026-07-31 起页面顶部新增目标选择器，内部提示文字和 CSV 路径按所选目标模板化，不再固定说明数据来自 OPN 实验）、CSV 导入与模板（+ `page_experimental_results`/`page_experimental_import` 两个包装函数） |
+| `experimental_browser.py` | 322 | 不属于本次拆分范围（Phase 1 之前就已独立成文件），嵌入 `views/representatives.py` 的"候选浏览"页面，不是独立导航项。2026-07-31 起 `render_opn_experimental_browser` 改名为 `render_experimental_browser(representatives, local_runs_dir, target_key)`，内部路径/session key/widget key 前缀全部按 `target_key` 参数化 |
 
 **命名坑，记录下来避免以后重蹈**：新目录本来想按计划叫 `ui/pages/`，实际建出来后 Streamlit 会把它当成自己的[多页面应用](https://docs.streamlit.io/develop/concepts/multipage-apps)功能目录，自动在侧边栏顶部加一份基于文件名生成的导航列表（这些文件本身不是可独立运行的页面，点开是空白页）。这个问题只有真正 `streamlit run` 起来才会暴露，`pytest`/`compileall` 都测不出来。已改名为 `ui/views/`，问题解决——以后新增 UI 子目录时不要用 `pages` 这个名字。
 
@@ -74,7 +74,7 @@ flowchart TD
 | `experimental_exploration.py` | 226 | `build_experiment_guided_exploration`：用已测数据的正/中/低表现锚点，通过 Levenshtein 序列相似度给未测候选打分，四通道配额选面板（正向邻域/通用预测强/多样性/低表现对照） | 曾经仅为借用 `signal_peptide_identity` 就 `import` 整个 `screening.py`；Phase 2 已修复，现在依赖 `similarity.py` |
 | `__init__.py` | 6（[EXECUTION_PLAN.md](EXECUTION_PLAN.md) Phase 5 完成，原 49 行精选重导出） | 刻意留空，只有一段说明性注释，指向应该 import 的子模块写法 | 见第 1 节的耦合解决说明 |
 
-**已知命名残留**：实验反馈闭环目前的路径/键名是**单目标硬编码**的——`ui/views/experimental_feedback.py`/`ui/views/fusion_localization.py` 里读取的固定路径是 `local_runs/experimental_feedback/opn_measurements.csv`，`target_key="opn"` 是字面量；`ui/experimental_browser.py` 的函数名是 `render_opn_experimental_browser`，session key 是 `fusion_selected_candidate_ids_opn`。而同一次推送刚把 `fusion_constructs.py` 从单目标改成了 `FUSION_TARGET_PRESETS` 多目标注册表。也就是说：**融合构建已经多目标化，但实验反馈闭环还没有跟上**——如果以后要给第二个目标蛋白接入湿实验数据，这些硬编码路径/键名会先炸。这是一个具体的"坑"，记录在 [EXECUTION_PLAN.md](EXECUTION_PLAN.md) 里跟踪。
+**实验反馈闭环已泛化为多目标（2026-07-31）**：`experimental_evidence.py`/`experimental_feedback.py` 以及三个 UI 文件（`ui/views/fusion_localization.py`/`ui/experimental_browser.py`/`ui/views/representatives.py`/`ui/views/experimental_feedback.py`）现在统一按 `target_key` 参数化——数据文件是 `local_runs/experimental_feedback/{target_key}_measurements.csv`（`opn_measurements.csv` 对已有数据保持字节不变），session key 是 `fusion_selected_candidate_ids_{target_key}`，`ui/experimental_browser.py` 的入口函数改名为 `render_experimental_browser(representatives, local_runs_dir, target_key)`。三个页面（候选浏览、融合定位、实验反馈）各有一个目标选择器，共享同一个 `st.session_state["fusion_target_key"]`。跟 `fusion_constructs.py` 早前就有的 `FUSION_TARGET_PRESETS` 多目标注册表衔接上了：现在只是 preset 里除 OPN 之外的目标还没有真实湿实验数据，选中后会走通用的"当前没有可用于候选决策的 {TARGET} 产量结果"空态提示，不是硬编码分支挡住或报错。详见 [CURRENT_GOALS.md](CURRENT_GOALS.md) 2026-07-31 记录。
 
 ## 5. 适配层（`src/sigscout/adapters/`）
 
@@ -96,8 +96,8 @@ flowchart TD
 
 ## 8. 测试布局
 
-`tests/` 与 `src/sigscout/services|adapters/` 基本一对一镜像命名（`test_screening.py`、`test_fusion_constructs.py` 等），`conftest.py` 提供共享 fixture。截至本文档编写，64 个测试全部通过。
+`tests/` 与 `src/sigscout/services|adapters/` 基本一对一镜像命名（`test_screening.py`、`test_fusion_constructs.py` 等），`conftest.py` 提供共享 fixture。截至本文档编写，66 个测试全部通过。
 
-**UI 层基本冒烟测试（`tests/test_ui_smoke.py`，2026-07-29 新增）**：用 Streamlit 自带的 `streamlit.testing.v1.AppTest` 框架（不开浏览器）给 4 个 view 模块的 10 个 `page_*` 函数各配一个测试，断言页面能无异常渲染且确实渲染出内容。**关键写法坑**：`AppTest.from_function` 要求传入的函数“自包含”——它是把函数源码提取出来单独执行，脱离原模块的 import 上下文，所以不能直接把 `page_screening` 这类定义在 view 模块里、内部引用同模块其他名字的函数传进去（会 `NameError`），每个页面都配了一个只做“函数内 import + 调用”的薄包装函数。另有一个 `test_pages_degrade_gracefully_without_local_data` 测试，用 `monkeypatch` 把 `PATHS` 指向空临时目录，验证页面在没有 `local_runs/`/`examples/opn/saved_screening/`（全新 checkout 场景）时也会走已有的优雅降级分支（`st.warning`）而不是抛异常。
+**UI 层基本冒烟测试（`tests/test_ui_smoke.py`，2026-07-29 新增）**：用 Streamlit 自带的 `streamlit.testing.v1.AppTest` 框架（不开浏览器）给 4 个 view 模块的 10 个 `page_*` 函数各配一个测试，断言页面能无异常渲染且确实渲染出内容。**关键写法坑**：`AppTest.from_function` 要求传入的函数“自包含”——它是把函数源码提取出来单独执行，脱离原模块的 import 上下文，所以不能直接把 `page_screening` 这类定义在 view 模块里、内部引用同模块其他名字的函数传进去（会 `NameError`），每个页面都配了一个只做“函数内 import + 调用”的薄包装函数。另有一个 `test_pages_degrade_gracefully_without_local_data` 测试，用 `monkeypatch` 把 `PATHS` 指向空临时目录，验证页面在没有 `local_runs/`/`examples/opn/saved_screening/`（全新 checkout 场景）时也会走已有的优雅降级分支（`st.warning`）而不是抛异常。2026-07-31 新增 `test_pages_degrade_gracefully_for_target_without_data`：预设 `st.session_state["fusion_target_key"] = "hlf"` 后跑候选浏览和实验反馈页面，验证的是"目标本身有效、但还没有这个目标的数据"这条不同的路径（区别于上一个测试模拟的"完全没有 local_runs 目录"）。
 
 这仍然只是“页面级冒烟”，不是全面的 UI 测试——不断言具体展示内容、不模拟按钮点击/表单交互，`pytest -q` 全绿也不能替代手动 Streamlit 走查（改 UI 后仍然要跑一遍浏览器验证，见 [CURRENT_GOALS.md](CURRENT_GOALS.md) 已知的坑）。

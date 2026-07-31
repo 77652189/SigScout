@@ -84,6 +84,34 @@ def test_hlf_never_loads_opn_evidence() -> None:
     assert annotated.iloc[0]["experimental_match_type"] == "none"
     assert annotated.iloc[0]["experimental_status"] == "untested"
 
+
+def test_hlf_matches_its_own_feedback_once_present() -> None:
+    """target_key 现在是真正参数化的：只要反馈数据里有匹配的 target_key，任意目标都能走完整匹配逻辑，不再只对 "opn" 生效。"""
+    feedback = pd.DataFrame([
+        {
+            "target_key": "hlf", "batch_id": "h1", "signal_peptide_id": "alpha-factor",
+            "signal_peptide_sequence": "MKAAA", "signal_peptide_nucleotide_sequence": "ATGAAA",
+            "target_protein_sequence": "DDD", "construct_variant": "wild_type",
+            "measurement_status": "measured", "batch_relative_to_best": 0.9,
+        },
+    ])
+    constructs = pd.DataFrame([
+        {"construct_id": "hlf-ac", "construct_type": "AC", "a_signal_peptide": "MKAAA", "construct_sequence": "MKAAADDD"}
+    ])
+    annotated = annotate_construct_experimental_evidence(constructs, feedback, "hlf")
+    assert annotated.iloc[0]["experimental_match_type"] == "exact_construct"
+    assert annotated.iloc[0]["experimental_status"] == "measured"
+    assert "HLF" in annotated.iloc[0]["experimental_note"]
+
+    candidates = pd.DataFrame([{"candidate_id": "c1", "signal_peptide_sequence": "MKAAA", "rules_score": 90}])
+    candidate_evidence = annotate_candidate_experimental_evidence(candidates, feedback, "hlf")
+    assert candidate_evidence.iloc[0]["experimental_status"] == "measured"
+
+    experimental_only = build_target_experimental_candidates(feedback, "hlf")
+    assert len(experimental_only) == 1
+    assert experimental_only.iloc[0]["candidate_id"].startswith("HLF_EXP_")
+    assert "HLF" in experimental_only.iloc[0]["source_protein_route_basis"]
+
 def test_experimental_decision_thresholds_are_explicit() -> None:
     assert _experimental_decision(0.80) == "优先复验"
     assert _experimental_decision(0.50) == "中等优先"

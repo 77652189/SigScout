@@ -47,10 +47,10 @@ def build_target_experimental_candidates(
             "caution": "实验结果不写入通用候选评分，也不向相似序列传播。",
             "source_protein_route": "实验构建",
             "source_protein_evidence_level": "目标专属实验",
-            "source_protein_route_basis": "OPN 实验报告中的精确氨基酸序列",
+            "source_protein_route_basis": f"{target_key.upper()} 实验报告中的精确氨基酸序列",
             "rules_score": float("nan"),
             "uspnet_prediction_label": "未对实验 leader 重新运行",
-            **_aggregate(group),
+            **_aggregate(group, target_key),
         })
     return pd.DataFrame(candidates)
 
@@ -86,7 +86,7 @@ def annotate_construct_experimental_evidence(
     target_key: str,
 ) -> pd.DataFrame:
     constructs = _as_frame(construct_rows)
-    if constructs.empty or target_key.strip().lower() != "opn":
+    if constructs.empty:
         return _with_empty(constructs, "none")
     feedback = _target_rows(_as_frame(feedback_rows), target_key)
     if feedback.empty:
@@ -102,7 +102,7 @@ def annotate_construct_experimental_evidence(
             updated.update(_empty("none"))
             annotated.append(updated)
             continue
-        evidence = _aggregate(group)
+        evidence = _aggregate(group, target_key)
         construct_sequence = _clean_aa(source.get("construct_sequence"))
         exact = False
         if str(source.get("construct_type", "")).upper() == "AC":
@@ -116,12 +116,12 @@ def annotate_construct_experimental_evidence(
             match_type = "result_missing"
         updated.update(evidence)
         updated["experimental_match_type"] = match_type
-        updated["experimental_note"] = _construct_note(match_type)
+        updated["experimental_note"] = _construct_note(match_type, target_key)
         annotated.append(updated)
     return pd.DataFrame(annotated)
 
 
-def _aggregate(group: pd.DataFrame) -> dict[str, object]:
+def _aggregate(group: pd.DataFrame, target_key: str) -> dict[str, object]:
     measured = group.loc[group["measurement_status"].astype(str).eq(MEASURED)]
     relative = pd.to_numeric(
         measured.get("batch_relative_to_best", pd.Series(dtype=float)), errors="coerce"
@@ -141,7 +141,7 @@ def _aggregate(group: pd.DataFrame) -> dict[str, object]:
         "experimental_record_count": int(len(group)),
         "experimental_batch_count": int(group["batch_id"].nunique()),
         "experimental_nucleotide_variant_count": len(nucleotide_variants),
-        "experimental_note": "仅表示该精确 A/leader 序列在 OPN 实验中出现；不改变通用预测分。",
+        "experimental_note": f"仅表示该精确 A/leader 序列在 {target_key.upper()} 实验中出现；不改变通用预测分。",
     }
 
 
@@ -155,12 +155,13 @@ def _unit_type(group: pd.DataFrame) -> str:
     return "full_leader"
 
 
-def _construct_note(match_type: str) -> str:
+def _construct_note(match_type: str, target_key: str) -> str:
+    label = target_key.upper()
     if match_type == "exact_construct":
-        return "完整 AC 氨基酸构建与 OPN 实验精确一致，可作为构建级证据。"
+        return f"完整 AC 氨基酸构建与 {label} 实验精确一致，可作为构建级证据。"
     if match_type == "result_missing":
         return "实验报告提及该 A/leader，但没有可用于排序的产量结果。"
-    return "仅 A/leader 序列与 OPN 实验一致；当前完整构建未被该实验验证。"
+    return f"仅 A/leader 序列与 {label} 实验一致；当前完整构建未被该实验验证。"
 
 
 def _empty(match_type: str) -> dict[str, object]:

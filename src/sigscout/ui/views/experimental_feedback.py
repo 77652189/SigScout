@@ -12,7 +12,21 @@ from sigscout.services.experimental_feedback import (
     save_experimental_feedback,
     summarize_experimental_feedback,
 )
+from sigscout.services.fusion_constructs import FUSION_TARGET_PRESETS
 from sigscout.ui._shared import PATHS
+
+
+def _select_experimental_target() -> str:
+    options = list(FUSION_TARGET_PRESETS.keys())
+    current = str(st.session_state.get("fusion_target_key", "opn"))
+    index = options.index(current) if current in options else 0
+    return st.selectbox(
+        "目标蛋白",
+        options,
+        index=index,
+        format_func=lambda key: FUSION_TARGET_PRESETS[key].label,
+        key="fusion_target_key",
+    )
 
 
 def page_experimental_results() -> None:
@@ -25,23 +39,26 @@ def page_experimental_import() -> None:
 
 def render_experimental_feedback(subpage: str = "实验结果") -> None:
     st.subheader("实验反馈")
-    st.info("当前实验反馈仅来自 OPN（骨桥蛋白）实验，不会自动外推到 hLF，也不会改写通用信号肽候选分数。")
-    path = PATHS.local_runs_dir / "experimental_feedback" / "opn_measurements.csv"
+    target_key = _select_experimental_target()
+    st.info("当前实验反馈按所选目标蛋白隔离，不会跨目标外推，也不会改写通用信号肽候选分数。")
+    path = PATHS.local_runs_dir / "experimental_feedback" / f"{target_key}_measurements.csv"
     if subpage == "导入与模板":
-        _render_experimental_feedback_import(path)
+        _render_experimental_feedback_import(path, target_key)
         return
-    result = load_experimental_feedback(path, target_key="opn")
+    result = load_experimental_feedback(path, target_key=target_key)
     if result.errors:
         for error in result.errors:
             st.error(error)
         return
     if result.rows.empty:
-        st.warning("尚未导入 OPN 实验反馈。请进入“导入与模板”上传标准 CSV。")
+        st.warning(f"尚未导入 {target_key.upper()} 实验反馈。请进入“导入与模板”上传标准 CSV。")
         return
-    _render_experimental_feedback_results(result.rows, result.warnings)
+    _render_experimental_feedback_results(result.rows, result.warnings, target_key)
 
 
-def _render_experimental_feedback_results(rows: pd.DataFrame, warnings: tuple[str, ...]) -> None:
+def _render_experimental_feedback_results(
+    rows: pd.DataFrame, warnings: tuple[str, ...], target_key: str
+) -> None:
     summary = summarize_experimental_feedback(rows)
     cols = st.columns(5)
     cols[0].metric("报告记录", int(summary["records"]))
@@ -107,12 +124,12 @@ def _render_experimental_feedback_results(rows: pd.DataFrame, warnings: tuple[st
         },
     )
     st.caption("“推定参考基线”用于轮内倍率验算，并非实验报告明确标注的正式对照。")
-    _render_experimental_sequence_details(batch)
+    _render_experimental_sequence_details(batch, target_key)
     with st.expander("查看完整结构化原始数据"):
         st.dataframe(batch, hide_index=True, use_container_width=True)
 
 
-def _render_experimental_sequence_details(batch: pd.DataFrame) -> None:
+def _render_experimental_sequence_details(batch: pd.DataFrame, target_key: str) -> None:
     with st.expander("查看报告原始名称与完整序列", expanded=False):
         choices = batch["experiment_id"].tolist()
         labels = batch.set_index("experiment_id")["source_construct_name"].to_dict()
@@ -138,7 +155,7 @@ def _render_experimental_sequence_details(batch: pd.DataFrame) -> None:
             key=f"experimental_sp_nt_{selected_id}",
         )
         st.text_area(
-            "OPN 氨基酸序列",
+            f"{target_key.upper()} 氨基酸序列",
             value=str(row["target_protein_sequence"]),
             height=150,
             key=f"experimental_target_aa_{selected_id}",
@@ -150,9 +167,10 @@ def _render_experimental_sequence_details(batch: pd.DataFrame) -> None:
             key=f"experimental_target_nt_{selected_id}",
         )
 
-def _render_experimental_feedback_import(path: Path) -> None:
-    st.markdown("**导入 OPN 实验反馈**")
-    st.caption("数据保存在本地忽略目录。上传会替换当前 OPN 实验反馈文件，不会修改候选库。")
+def _render_experimental_feedback_import(path: Path, target_key: str) -> None:
+    label = target_key.upper()
+    st.markdown(f"**导入 {label} 实验反馈**")
+    st.caption(f"数据保存在本地忽略目录。上传会替换当前 {label} 实验反馈文件，不会修改候选库。")
     st.download_button(
         "下载实验反馈 CSV 模板",
         experimental_feedback_template().encode("utf-8-sig"),
@@ -162,12 +180,12 @@ def _render_experimental_feedback_import(path: Path) -> None:
     uploaded = st.file_uploader("上传填写后的 CSV", type=["csv"], key="experimental_feedback_upload")
     if uploaded is None:
         return
-    result = parse_experimental_feedback_csv(uploaded.getvalue(), target_key="opn")
+    result = parse_experimental_feedback_csv(uploaded.getvalue(), target_key=target_key)
     if result.errors:
         for error in result.errors:
             st.error(error)
         return
     st.dataframe(result.rows, hide_index=True, use_container_width=True)
-    if st.button("保存为当前 OPN 实验反馈", type="primary", key="save_experimental_feedback"):
+    if st.button(f"保存为当前 {label} 实验反馈", type="primary", key="save_experimental_feedback"):
         save_experimental_feedback(result.rows, path)
-        st.success(f"已保存 {len(result.rows)} 条 OPN 实验记录（含结果缺失记录）。")
+        st.success(f"已保存 {len(result.rows)} 条 {label} 实验记录（含结果缺失记录）。")

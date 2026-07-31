@@ -169,3 +169,22 @@ def test_pages_degrade_gracefully_without_local_data(tmp_path, monkeypatch) -> N
         at.run()
         assert not at.exception
         assert at.warning
+
+
+def test_pages_degrade_gracefully_for_target_without_data() -> None:
+    """目标切到 hlf（占位目标，尚无实测数据）：候选浏览的目标实验视图和实验反馈页面
+    应该走"当前目标暂无数据"的通用空态分支，而不是抛异常或残留旧的硬编码占位文案。
+
+    验证的是 hLF 泛化改动新增的"目标有效、但没有该目标的数据"路径，区别于上面
+    test_pages_degrade_gracefully_without_local_data 验证的"完全没有 local_runs 目录"场景。
+    """
+    at = AppTest.from_function(_run_page_candidate_browser)
+    at.session_state["candidate_browser_mode"] = "目标实验视图"
+    at.session_state["fusion_target_key"] = "hlf"
+    at.run()
+    assert not at.exception
+
+    at = AppTest.from_function(_run_page_experimental_results)
+    at.session_state["fusion_target_key"] = "hlf"
+    at.run()
+    assert not at.exception

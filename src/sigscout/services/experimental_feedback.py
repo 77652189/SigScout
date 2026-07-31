@@ -136,7 +136,7 @@ def prepare_experimental_feedback(
     if (context_counts > 1).any(axis=None):
         warnings.append("同一 batch_id 内存在不同宿主、位点或目标版本，批内排名可能混杂。")
     if rows["batch_id"].nunique() > 1:
-        warnings.append("不同轮次的宿主、整合位点或 OPN 版本不同；跨轮次绝对产量不能归因于信号肽。")
+        warnings.append("不同轮次的宿主、整合位点或目标蛋白版本不同；跨轮次绝对产量不能归因于信号肽。")
     return ExperimentalFeedbackResult(_add_batch_metrics(rows), tuple(errors), tuple(warnings))
 
 

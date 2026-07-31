@@ -72,10 +72,10 @@ def _clear_fusion_session_rows() -> None:
         if key in {"fusion_construct_rows", "fusion_construct_errors", "fusion_localization_rows"} or key.startswith("fusion_localization_rows_"):
             st.session_state.pop(key, None)
 
-def _opn_feedback_rows() -> pd.DataFrame:
+def _feedback_rows(target_key: str) -> pd.DataFrame:
     result = load_experimental_feedback(
-        PATHS.local_runs_dir / "experimental_feedback" / "opn_measurements.csv",
-        target_key="opn",
+        PATHS.local_runs_dir / "experimental_feedback" / f"{target_key}_measurements.csv",
+        target_key=target_key,
     )
     return result.rows if result.valid else pd.DataFrame()
 
@@ -87,21 +87,19 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
     target_key, target_preset = _select_fusion_target()
     candidate_rows = representatives.copy()
     selected_ids = set(st.session_state.get(f"fusion_selected_candidate_ids_{target_key}", []))
-    source_options = ["使用全部代表序列"]
-    if target_key == "opn":
-        source_options.insert(0, "使用候选浏览已选项")
-        feedback = _opn_feedback_rows()
-        experimental = build_target_experimental_candidates(feedback, "opn")
-        if not experimental.empty:
-            known = set(candidate_rows["signal_peptide_sequence"].astype(str).str.upper())
-            experimental = experimental[
-                ~experimental["signal_peptide_sequence"].astype(str).str.upper().isin(known)
-            ]
-            candidate_rows = pd.concat([candidate_rows, experimental], ignore_index=True, sort=False)
+    source_options = ["使用候选浏览已选项", "使用全部代表序列"]
+    feedback = _feedback_rows(target_key)
+    experimental = build_target_experimental_candidates(feedback, target_key)
+    if not experimental.empty:
+        known = set(candidate_rows["signal_peptide_sequence"].astype(str).str.upper())
+        experimental = experimental[
+            ~experimental["signal_peptide_sequence"].astype(str).str.upper().isin(known)
+        ]
+        candidate_rows = pd.concat([candidate_rows, experimental], ignore_index=True, sort=False)
     source_mode = st.radio(
         "候选来源",
         source_options,
-        index=0 if selected_ids and target_key == "opn" else len(source_options) - 1,
+        index=0 if selected_ids else len(source_options) - 1,
         horizontal=True,
         key=f"fusion_candidate_source_{target_key}",
     )
@@ -109,9 +107,9 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
         candidate_rows = candidate_rows[
             candidate_rows["candidate_id"].astype(str).isin(selected_ids)
         ]
-        st.caption(f"当前使用 {len(candidate_rows)} 个 OPN 已选候选。")
+        st.caption(f"当前使用 {len(candidate_rows)} 个 {target_key.upper()} 已选候选。")
         if candidate_rows.empty:
-            st.warning("当前没有可用的 OPN 已选候选，请先在候选浏览中加入融合评估。")
+            st.warning(f"当前没有可用的 {target_key.upper()} 已选候选，请先在候选浏览中加入融合评估。")
     input_cols = st.columns(2)
     b_sequence = input_cols[0].text_area(
         "B 固定序列（例如 α-factor pro 区）",
@@ -300,7 +298,7 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
     localization_rows = list(st.session_state.get(session_rows_key, construct_rows))
     if not localization_rows:
         return
-    feedback = _opn_feedback_rows() if target_key == "opn" else pd.DataFrame()
+    feedback = _feedback_rows(target_key)
     annotated_rows = annotate_construct_experimental_evidence(
         localization_rows, feedback, target_key
     ).to_dict(orient="records")
@@ -381,7 +379,7 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
 
 
 def _render_experimental_match_tabs(frame: pd.DataFrame, target_key: str) -> None:
-    ranking_tab, evidence_tab = st.tabs(["定位排序", "OPN 实验匹配"])
+    ranking_tab, evidence_tab = st.tabs(["定位排序", f"{target_key.upper()} 实验匹配"])
     with ranking_tab:
         st.caption("定位排序仅使用 DeepLoc/BUSCA、加工位点和风险扫描；实验反馈不参与总分。")
         st.dataframe(
@@ -393,9 +391,6 @@ def _render_experimental_match_tabs(frame: pd.DataFrame, target_key: str) -> Non
             use_container_width=True,
         )
     with evidence_tab:
-        if target_key != "opn":
-            st.info("暂无 hLF 实验反馈。")
-            return
         exact = frame[frame["experimental_match_type"].astype(str).eq("exact_construct")].copy()
         related = frame[frame["experimental_match_type"].astype(str).eq("a_sequence_only")].copy()
         missing = frame[frame["experimental_match_type"].astype(str).eq("result_missing")].copy()
@@ -418,7 +413,7 @@ def _render_experimental_match_tabs(frame: pd.DataFrame, target_key: str) -> Non
             st.markdown("**报告提及但结果缺失**")
             st.dataframe(missing[[c for c in evidence_columns if c in missing]], hide_index=True, use_container_width=True)
         if exact.empty and related.empty and missing.empty:
-            st.info("当前构建没有 OPN 精确序列实验关联；新增候选可能需要重新生成 FASTA 并运行定位评估。")
+            st.info(f"当前构建没有 {target_key.upper()} 精确序列实验关联；新增候选可能需要重新生成 FASTA 并运行定位评估。")
 
 
 def _render_batch_processing_notes(frame: pd.DataFrame) -> None:
@@ -537,8 +532,9 @@ def _render_fusion_sequence_card(row: pd.Series) -> None:
         )
         match_type = str(row.get("experimental_match_type", "none"))
         if match_type != "none":
+            target_key = str(row.get("target_key", "opn")).upper()
             st.info(
-                f"OPN 实验匹配：{match_type}；批内相对最佳 "
+                f"{target_key} 实验匹配：{match_type}；批内相对最佳 "
                 f"{_format_number(row.get('experimental_relative_median'))}；"
                 f"{row.get('experimental_batch_count', 0)} 轮 / "
                 f"{row.get('experimental_record_count', 0)} 条记录。"
