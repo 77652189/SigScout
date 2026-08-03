@@ -1,75 +1,86 @@
-# SigScout
+# SigScout — Signal Peptide Discovery & Guided Exploration
 
 [English](README.md) · [中文](README.zh.md)
 
-> **signal-peptide discovery, screening, clustering, and experiment-guided exploration for secretion constructs.** It is built for reviewable decisions, not unqualified claims.
+> Finds, explains and clusters signal-peptide candidates for secretion constructs, then uses wet-lab
+> feedback to narrow the next round — **transparently**, without pretending to be a yield model.
 
-## Why it matters
+Split out of the secretion-model project ([its ADR-010](https://github.com/77652189/pcSecYeastSpecies))
+once signal-peptide work stopped fitting there. SignalP is not used: its licence bars commercial
+use. Candidates come from UniProt-verified natural signal peptides plus commercially usable
+open-source tools.
 
-This project makes a high-stakes research or product decision inspectable: inputs, constraints, evidence, and the final human decision remain visible.
+---
 
-## What makes it strong
-
-> **Project-specific spotlight:** Source evidence, target-isolated feedback, and diversity stay separate instead of becoming one misleading score.
-
-| Design choice | Value for an interviewer |
-| --- | --- |
-| Evidence before recommendation | Results retain source, constraint, and failure context |
-| Human decision boundary | The system narrows choices; it does not authorize scientific, compliance, or deployment action |
-| Explicit non-goals | Unsupported claims are documented rather than implied by a polished UI |
-| Canon + tests | Requirements, architecture, status, handoff, and long-lived decisions remain separately reviewable |
-
-## Workflow
+## Architecture
 
 ```mermaid
 flowchart LR
-  A[Input or source data] --> B[Domain workflow]
-  B --> C[Constraints and evidence]
-  C --> D[Human review]
-  D --> E[Traceable output]
+  SRC["adapters/<br/>uniprot · quickgo · uspnet"] --> CORE["core/<br/>inputs · models · coercion"]
+  CORE --> SVC["services/<br/>fetch · cluster · overlay · exploration"]
+  SVC --> UI["ui/streamlit_app.py"]
+  SVC --> CLI["cli.py"]
 ```
 
-## Architecture boundary
+Streamlit and CLI are two entry points onto the same services — a candidate ranked in one is
+ranked identically in the other.
 
-```mermaid
-flowchart TB
-  UI[User or API entry] --> APP[Application workflow]
-  APP --> DOMAIN[Domain rules]
-  APP --> PORTS[External-service boundary]
-  DOMAIN --> OUT[Reviewable result]
-  OUT --> HUMAN[Human decision]
-```
+## What it does
+
+- Fetch candidates from remote sources or local CSV, **keeping duplicates and their evidence**
+  rather than silently deduplicating away the fact that two sources agreed
+- Filter with explainable rules, optional local prediction re-checks, and source-protein evidence
+- Cluster similar signal peptides, keeping every candidate and emitting a representative sequence
+- Generate fusion constructs; export CSV, FASTA and JSON summaries
+- Import wet-lab measurements and produce a next-round exploration panel containing positive
+  neighbourhoods, general support, diversity, and **low-performer controls**
 
 ## Quick start
 
-Prepare the supported local environment, then run:
-
 ```powershell
-python -m streamlit run src/sigscout/ui/streamlit_app.py --server.address 0.0.0.0 --server.port 8506
+python -m streamlit run src/sigscout/ui/streamlit_app.py
 ```
 
-## Engineering evidence
+## Engineering decisions
 
-| Checkpoint | Evidence | Boundary |
-| --- | --- | --- |
-| Product behavior | Run the focused tests named in Handoff | No output becomes a validated real-world outcome automatically |
-| Documentation | Run the repository documentation guard | Current status belongs to the execution plan, not this README |
-| Current direction | Read the execution plan before extending scope | No product slice is authorized; new sources or targets require explicit data and acceptance boundaries. |
+**Guided exploration is a candidate-compression tool, not a yield model**
+([ADR-006](docs/adr/006-guided-exploration-not-yield-model.md)). It is allowed to say "these are
+worth trying next"; it is not allowed to imply predicted titre, cross-batch comparability, or
+statistical significance. The panel deliberately includes low performers — a panel of only the
+best-so-far stops being exploration.
 
-## Authoritative project documents
+**Experimental feedback is keyed by exact sequence and stays out of the localization score**
+([ADR-005](docs/adr/005-experimental-evidence-boundary.md)). Similar sequence ≠ validated
+candidate, and feedback from one target never propagates to another. Merging feedback into the
+external localization tool's score would produce one uninterpretable total — so it does not happen.
 
-| Document | Use it for |
+**The shared candidate library stays target-agnostic**
+([ADR-004](docs/adr/004-shared-library-target-overlays.md)). Target-specific differences live in
+isolated overlays, so a second target cannot quietly rewrite the first target's library.
+
+**Tracked documents use target de-identification**
+([ADR-001](docs/adr/001-confidential-document-scope.md)) — committed material carries
+mechanism-level abstraction only.
+
+## Boundaries
+
+- **No yield prediction**, no cross-batch comparability, no significance claims.
+- **Short signal peptides and full leaders are never mixed** in guided-exploration scoring.
+- **No automatic calls to external web localization tools**, and no automatic download or
+  submission of licence-restricted model resources.
+- Source-protein assessment runs **separately from** candidate refresh, and refresh preserves
+  completed annotations ([ADR-007](docs/adr/007-source-annotation-lifecycle.md)).
+
+## Documentation
+
+| Document | Changes when |
 | --- | --- |
-| [Requirements](docs/REQUIREMENTS.md) | Scope and capability boundary |
-| [Architecture](docs/ARCHITECTURE.md) | Layer rules and protected boundaries |
-| [Execution plan](docs/EXECUTION_PLAN.md) | Current authority, gates, and blockers |
-| [Handoff](docs/HANDOFF.md) | Current slice and verification |
-| [ADR index](docs/adr/README.md) | Long-lived decisions and alternatives |
+| [Requirements](docs/REQUIREMENTS.md) | the goal or capability boundary changes |
+| [Architecture](docs/ARCHITECTURE.md) | the implementation structure changes |
+| [Execution plan](docs/EXECUTION_PLAN.md) | progress moves — sole authority on status |
+| [Handoff](docs/HANDOFF.md) | the active slice changes |
+| [ADR index](docs/adr/README.md) | never — decisions are superseded, not edited |
 
-<details>
-<summary>Technical interview lens</summary>
+---
 
-The strongest discussion point is not a framework name: it is the explicit boundary between evidence, computation, and the person who remains accountable for the final decision. Current status and blockers are intentionally linked rather than copied here.
-</details>
-
-> **Reflection:** Reliable tools do not hide uncertainty; they make the next decision easier to defend. Explore more work at [my personal site](https://77652189.github.io).
+> More work at [my personal site](https://77652189.github.io).
