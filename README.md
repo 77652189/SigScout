@@ -1,6 +1,6 @@
 # SigScout
 
-[English](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+[English](README.md) · [中文](README.zh.md)
 
 > **signal-peptide discovery, screening, clustering, and experiment-guided exploration for secretion constructs.** It is built for reviewable decisions, not unqualified claims.
 

@@ -1,6 +1,6 @@
 # SigScout 信号肽探索工作台
 
-[English](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+[English](README.md) · [中文](README.zh.md)
 
 > **用于分泌构建的信号肽发现、筛选、聚类与实验引导探索。** It is built for reviewable decisions, not unqualified claims.
 
