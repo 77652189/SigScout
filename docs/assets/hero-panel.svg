@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 250" width="1000" height="250" role="img" aria-labelledby="t d">
+<title id="t">SigScout</title>
+<desc id="d">A field of candidate sequences. Larger filled markers are measured anchors - three high performers, two medium, two low. Ringed candidates form the next panel: several drawn from near the high anchors, several from empty regions far from everything already chosen, and one deliberately taken from beside a low-performing anchor as a control.</desc>
+<style>
+  .bg{fill:#ffffff}
+  .fr{fill:none;stroke:#d8d5cc;stroke-width:1.5}
+  .dot{fill:#dcd9d1}
+  .hi{fill:#0F766E}
+  .mid{fill:#9FE1CB}
+  .lo{fill:#BA7517}
+  .rhi{fill:none;stroke:#0F766E;stroke-width:2}
+  .rdiv{fill:none;stroke:#8b8b85;stroke-width:2;stroke-dasharray:4 3}
+  .rlo{fill:none;stroke:#BA7517;stroke-width:2}
+  @media (prefers-color-scheme:dark){
+    .bg{fill:#0d1117} .fr{stroke:#3a3d44} .dot{fill:#2e3138}
+    .hi{fill:#2fa88f} .mid{fill:#1d7a68} .lo{fill:#EF9F27}
+    .rhi{stroke:#2fa88f} .rdiv{stroke:#8b8b85} .rlo{stroke:#EF9F27}
+  }
+</style>
+<rect class="bg" x="0" y="0" width="1000" height="250"/>
+<rect class="fr" x="60" y="30" width="880" height="190" rx="5"/>
+
+<circle class="dot" cx="110" cy="72" r="4"/><circle class="dot" cx="152" cy="118" r="4"/><circle class="dot" cx="128" cy="176" r="4"/>
+<circle class="dot" cx="196" cy="58" r="4"/><circle class="dot" cx="212" cy="146" r="4"/><circle class="dot" cx="176" cy="196" r="4"/>
+<circle class="dot" cx="258" cy="92" r="4"/><circle class="dot" cx="286" cy="164" r="4"/><circle class="dot" cx="238" cy="46" r="4"/>
+<circle class="dot" cx="330" cy="126" r="4"/><circle class="dot" cx="352" cy="66" r="4"/><circle class="dot" cx="308" cy="192" r="4"/>
+<circle class="dot" cx="404" cy="98" r="4"/><circle class="dot" cx="432" cy="158" r="4"/><circle class="dot" cx="386" cy="52" r="4"/>
+<circle class="dot" cx="470" cy="184" r="4"/><circle class="dot" cx="496" cy="76" r="4"/><circle class="dot" cx="454" cy="122" r="4"/>
+<circle class="dot" cx="548" cy="150" r="4"/><circle class="dot" cx="572" cy="60" r="4"/><circle class="dot" cx="524" cy="196" r="4"/>
+<circle class="dot" cx="622" cy="106" r="4"/><circle class="dot" cx="648" cy="170" r="4"/><circle class="dot" cx="604" cy="46" r="4"/>
+<circle class="dot" cx="704" cy="88" r="4"/><circle class="dot" cx="728" cy="152" r="4"/><circle class="dot" cx="684" cy="198" r="4"/>
+<circle class="dot" cx="782" cy="120" r="4"/><circle class="dot" cx="808" cy="62" r="4"/><circle class="dot" cx="762" cy="182" r="4"/>
+<circle class="dot" cx="856" cy="96" r="4"/><circle class="dot" cx="884" cy="164" r="4"/><circle class="dot" cx="838" cy="44" r="4"/>
+<circle class="dot" cx="912" cy="130" r="4"/><circle class="dot" cx="896" cy="200" r="4"/>
+
+<circle class="hi" cx="226" cy="112" r="8"/>
+<circle class="hi" cx="272" cy="132" r="8"/>
+<circle class="hi" cx="244" cy="152" r="8"/>
+<circle class="mid" cx="520" cy="112" r="8"/>
+<circle class="mid" cx="562" cy="128" r="8"/>
+<circle class="lo" cx="828" cy="128" r="8"/>
+<circle class="lo" cx="866" cy="140" r="8"/>
+
+<circle class="rhi" cx="204" cy="132" r="9"/>
+<circle class="rhi" cx="252" cy="88" r="9"/>
+<circle class="rhi" cx="290" cy="152" r="9"/>
+<circle class="rhi" cx="216" cy="170" r="9"/>
+<circle class="rdiv" cx="392" cy="196" r="9"/>
+<circle class="rdiv" cx="664" cy="52" r="9"/>
+<circle class="rdiv" cx="484" cy="46" r="9"/>
+<circle class="rlo" cx="848" cy="106" r="9"/>
+</svg>

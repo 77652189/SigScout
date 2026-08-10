@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 400" width="700" height="400" role="img" aria-labelledby="t d">
+<title id="t">The panel fills four channels by quota, not the top N by score</title>
+<desc id="d">Measured candidates fall into three tiers by relative median. The guided score subtracts similarity to low performers, while the fourth channel selects exactly those candidates as mechanistic controls. Scoring answers whether a candidate is worth betting on; composition answers what the round will teach.</desc>
+<defs><marker id="w" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" class="arw"/></marker></defs>
+<style>
+  .bg{fill:#ffffff}
+  .box{fill:#f4f2ec;stroke:#d8d5cc;stroke-width:1}
+  .ti{fill:#2c2c2a;font:500 15px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .sim{fill:#8b8b85;font:400 11px system-ui,-apple-system,'Segoe UI',sans-serif;font-style:italic}
+  .h{fill:#2c2c2a;font:500 13px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .s{fill:#5f5e5a;font:400 11.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .mono{fill:#5f5e5a;font:400 11.5px ui-monospace,Consolas,monospace}
+  .neg{fill:#8a5a00;font:500 11.5px ui-monospace,Consolas,monospace}
+  .warn{fill:#8a5a00;font:500 13px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .okt{fill:#0F766E;font:500 12.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .note{fill:#5f5e5a;font:400 11.5px system-ui,-apple-system,'Segoe UI',sans-serif}
+  .b1{fill:#0F766E} .b2{fill:#5DCAA5} .b3{fill:#B4B2A9} .b4{fill:#BA7517}
+  .arw{fill:#BA7517}
+  .link{stroke:#BA7517;stroke-width:1.6;fill:none;stroke-dasharray:5 4}
+  @media (prefers-color-scheme:dark){
+    .bg{fill:#0d1117} .box{fill:#1c1f26;stroke:#3a3d44}
+    .ti{fill:#e8e6e0} .sim{fill:#8b8b85} .h{fill:#e8e6e0} .s{fill:#b4b2a9}
+    .mono{fill:#b4b2a9} .neg{fill:#EF9F27} .warn{fill:#EF9F27} .okt{fill:#5DCAA5} .note{fill:#b4b2a9}
+    .b1{fill:#2fa88f} .b2{fill:#1d7a68} .b3{fill:#5f5e5a} .b4{fill:#EF9F27}
+    .arw{fill:#EF9F27} .link{stroke:#EF9F27}
+  }
+</style>
+<rect class="bg" x="0" y="0" width="700" height="400"/>
+<text class="ti" x="20" y="26">The panel fills by quota, not by taking the top N</text>
+<text class="sim" x="20" y="44">Tiers, weights and quotas verified against services/experimental_exploration.py</text>
+
+<rect class="box" x="20" y="58" width="292" height="72" rx="6"/>
+<text class="h" x="34" y="79">measured tiers (relative median)</text>
+<text class="s" x="34" y="100">positive ≥ 0.80　　medium 0.50–0.80</text>
+<text class="s" x="34" y="119">low &lt; 0.50　　each tier becomes anchors</text>
+
+<rect class="box" x="20" y="140" width="292" height="118" rx="6"/>
+<text class="h" x="34" y="161">two scores</text>
+<text class="mono" x="34" y="182">generic = rules·0.60 + consensus·0.20</text>
+<text class="mono" x="34" y="199">        + uspnet·0.10 + source·0.10</text>
+<text class="mono" x="34" y="221">guided  = positive·0.45 + medium·0.15</text>
+<text class="mono" x="34" y="238">        + generic·0.30</text>
+<text class="neg" x="34" y="252">        − low-performer identity · 0.15</text>
+
+<rect class="box" x="340" y="58" width="340" height="200" rx="6"/>
+<text class="h" x="354" y="80">positive anchor neighbourhood</text>
+<rect class="b1" x="354" y="88" width="120" height="9" rx="2"/><text class="s" x="482" y="96">40%</text>
+<text class="h" x="354" y="128">generic prediction support</text>
+<rect class="b2" x="354" y="136" width="90" height="9" rx="2"/><text class="s" x="452" y="144">30%</text>
+<text class="h" x="354" y="176">diversity (greedy max-min)</text>
+<rect class="b3" x="354" y="184" width="60" height="9" rx="2"/><text class="s" x="422" y="192">20%</text>
+<text class="warn" x="354" y="224">low-performer controls</text>
+<rect class="b4" x="354" y="232" width="30" height="9" rx="2"/><text class="s" x="392" y="240">remainder</text>
+
+<path class="link" d="M 316 250 C 330 250 330 236 346 236" marker-end="url(#w)"/>
+
+<text class="okt" x="20" y="292">The same "resembles a low performer" subtracts in scoring and has its own quota in the panel.</text>
+<text class="note" x="20" y="318">They answer different questions. <tspan class="okt">Scoring</tspan> asks whether a candidate is worth betting on — one that looks</text>
+<text class="note" x="20" y="340">like a known failure is not. <tspan class="warn">Composition</tspan> asks what the round will teach — testing only safe bets</text>
+<text class="note" x="20" y="362">never locates the boundary. The control channel takes the remainder, but as its own separate pass:</text>
+<text class="note" x="20" y="384">the first three cannot squeeze it to zero, and every row carries its channel and a readable reason.</text>
+</svg>
