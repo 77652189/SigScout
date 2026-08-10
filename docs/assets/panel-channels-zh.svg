@@ -42,7 +42,7 @@
 <text class="mono" x="34" y="238">        + generic·0.30</text>
 <text class="neg" x="34" y="252">        − 低表现相似度 · 0.15</text>
 
-<rect class="box" x="340" y="58" width="340" height="200" rx="6"/>
+<rect class="box" x="340" y="58" width="340" height="216" rx="6"/>
 <text class="h" x="354" y="80">正向锚点邻域</text>
 <rect class="b1" x="354" y="88" width="120" height="9" rx="2"/><text class="s" x="482" y="96">40%</text>
 <text class="h" x="354" y="128">通用预测强</text>
@@ -51,6 +51,7 @@
 <rect class="b3" x="354" y="184" width="60" height="9" rx="2"/><text class="s" x="422" y="192">20%</text>
 <text class="warn" x="354" y="224">低表现邻域对照</text>
 <rect class="b4" x="354" y="232" width="30" height="9" rx="2"/><text class="s" x="392" y="240">余下</text>
+<text class="s" x="354" y="262">同样相似时取<tspan class="warn">通用证据最强</tspan>者 —— 于是成败都有信息</text>
 
 <path class="link" d="M 316 250 C 330 250 330 236 346 236" marker-end="url(#w)"/>
 

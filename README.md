@@ -88,11 +88,27 @@ bets never locates the boundary it exists to find. As
 [ADR-006](docs/adr/006-guided-exploration-not-yield-model.md) puts it, a panel of only the
 best-so-far has stopped being exploration.
 
-The control channel takes the remainder but runs as its own separate pass, so the first three
-cannot squeeze it to zero. Diversity is a greedy max-min selection that recomputes every remaining
-candidate's similarity to the current panel after each pick. And every selected row carries the
-channel that admitted it plus a human-readable reason naming the anchor and the similarity — the
-panel is reviewable without reading the code.
+Those candidates are not winning on the guided score — **they never enter that contest**. The
+control channel is its own pass with its own sort key and its own quota, so the score never gets a
+chance to exclude them, and the first three channels cannot squeeze it to zero.
+
+**And it is not a token negative.** The sort has two levels: most similar to a low-performing
+anchor first, then — among candidates equally close to a known failure — **the one with the
+strongest feedback-independent evidence**. So the channel picks what *looks most promising while
+sitting in a neighbourhood that already failed*, which makes the outcome discriminating either way:
+
+| Result | What it tells you |
+| --- | --- |
+| It works | The generic evidence was right; that anchor failed for some other reason, not its neighbourhood |
+| It fails | The neighbourhood was right; the rules have a blind spot, and now you know where |
+
+Taking the *weakest* evidence instead would have guaranteed failure and taught nothing. This is a
+designed discriminating experiment, not a courtesy negative.
+
+Diversity is a greedy max-min selection that recomputes every remaining candidate's similarity to
+the current panel after each pick. And every selected row carries the channel that admitted it plus
+a human-readable reason naming the anchor and the similarity — the panel is reviewable without
+reading the code.
 
 **With no feedback there is no panel.** If nothing is measured, or nothing is untested, the
 function returns empty rather than falling back to a generic ranking. Guided exploration without
