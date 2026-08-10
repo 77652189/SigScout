@@ -14,18 +14,19 @@ from sigscout.services.experimental_feedback import (
 )
 from sigscout.services.fusion_constructs import FUSION_TARGET_PRESETS
 from sigscout.ui._shared import PATHS
+from sigscout.ui.target_state import commit_target_selector, prepare_target_selector, target_state_key
 
 
-def _select_experimental_target() -> str:
+def _select_experimental_target(widget_scope: str) -> str:
     options = list(FUSION_TARGET_PRESETS.keys())
-    current = str(st.session_state.get("fusion_target_key", "opn"))
-    index = options.index(current) if current in options else 0
+    widget_key = prepare_target_selector(widget_scope, options)
     return st.selectbox(
         "目标蛋白",
         options,
-        index=index,
         format_func=lambda key: FUSION_TARGET_PRESETS[key].label,
-        key="fusion_target_key",
+        key=widget_key,
+        on_change=commit_target_selector,
+        args=(widget_key, options),
     )
 
 
@@ -39,7 +40,8 @@ def page_experimental_import() -> None:
 
 def render_experimental_feedback(subpage: str = "实验结果") -> None:
     st.subheader("实验反馈")
-    target_key = _select_experimental_target()
+    selector_scope = "experimental_import" if subpage == "导入与模板" else "experimental_results"
+    target_key = _select_experimental_target(selector_scope)
     st.info("当前实验反馈按所选目标蛋白隔离，不会跨目标外推，也不会改写通用信号肽候选分数。")
     path = PATHS.local_runs_dir / "experimental_feedback" / f"{target_key}_measurements.csv"
     if subpage == "导入与模板":
@@ -70,7 +72,11 @@ def _render_experimental_feedback_results(
         st.warning(warning)
 
     batch_options = rows["batch_id"].drop_duplicates().tolist()
-    selected_batch = st.selectbox("实验轮次", batch_options, key="experimental_feedback_batch")
+    selected_batch = st.selectbox(
+        "实验轮次",
+        batch_options,
+        key=target_state_key("experimental_feedback_batch", target_key),
+    )
     batch = rows.loc[rows["batch_id"] == selected_batch].copy()
     batch = batch.sort_values(["measurement_status", "batch_rank"], na_position="last")
     context = batch.iloc[0]
@@ -137,35 +143,46 @@ def _render_experimental_sequence_details(batch: pd.DataFrame, target_key: str) 
             "构建记录",
             choices,
             format_func=lambda value: labels.get(value, value),
-            key=f"experimental_sequence_{batch['batch_id'].iloc[0]}",
+            key=target_state_key(f"experimental_sequence_{batch['batch_id'].iloc[0]}", target_key),
         )
         row = batch.loc[batch["experiment_id"] == selected_id].iloc[0]
-        st.text_input("报告原始构建名", value=str(row["source_construct_name"]), disabled=True)
-        st.text_input("内部规范化 ID", value=str(row["construct_name"]), disabled=True)
+        st.text_input(
+            "报告原始构建名",
+            value=str(row["source_construct_name"]),
+            disabled=True,
+            key=target_state_key(f"experimental_source_name_{selected_id}", target_key),
+        )
+        st.text_input(
+            "内部规范化 ID",
+            value=str(row["construct_name"]),
+            disabled=True,
+            key=target_state_key(f"experimental_construct_name_{selected_id}", target_key),
+        )
         st.text_area(
             "信号肽氨基酸序列",
             value=str(row["signal_peptide_sequence"]),
             height=100,
-            key=f"experimental_sp_aa_{selected_id}",
+            key=target_state_key(f"experimental_sp_aa_{selected_id}", target_key),
         )
         st.text_area(
             "信号肽核苷酸序列",
             value=str(row["signal_peptide_nucleotide_sequence"]),
             height=120,
-            key=f"experimental_sp_nt_{selected_id}",
+            key=target_state_key(f"experimental_sp_nt_{selected_id}", target_key),
         )
         st.text_area(
             f"{target_key.upper()} 氨基酸序列",
             value=str(row["target_protein_sequence"]),
             height=150,
-            key=f"experimental_target_aa_{selected_id}",
+            key=target_state_key(f"experimental_target_aa_{selected_id}", target_key),
         )
         st.text_area(
             f"{row['target_variant']} 核苷酸序列",
             value=str(row["target_nucleotide_sequence"]),
             height=180,
-            key=f"experimental_target_nt_{selected_id}",
+            key=target_state_key(f"experimental_target_nt_{selected_id}", target_key),
         )
+
 
 def _render_experimental_feedback_import(path: Path, target_key: str) -> None:
     label = target_key.upper()
@@ -174,10 +191,15 @@ def _render_experimental_feedback_import(path: Path, target_key: str) -> None:
     st.download_button(
         "下载实验反馈 CSV 模板",
         experimental_feedback_template().encode("utf-8-sig"),
-        file_name="experimental_feedback_template.csv",
+        file_name=f"{target_key}_experimental_feedback_template.csv",
         mime="text/csv",
+        key=target_state_key("experimental_feedback_template_download", target_key),
     )
-    uploaded = st.file_uploader("上传填写后的 CSV", type=["csv"], key="experimental_feedback_upload")
+    uploaded = st.file_uploader(
+        "上传填写后的 CSV",
+        type=["csv"],
+        key=target_state_key("experimental_feedback_upload", target_key),
+    )
     if uploaded is None:
         return
     result = parse_experimental_feedback_csv(uploaded.getvalue(), target_key=target_key)
@@ -186,6 +208,10 @@ def _render_experimental_feedback_import(path: Path, target_key: str) -> None:
             st.error(error)
         return
     st.dataframe(result.rows, hide_index=True, use_container_width=True)
-    if st.button(f"保存为当前 {label} 实验反馈", type="primary", key="save_experimental_feedback"):
+    if st.button(
+        f"保存为当前 {label} 实验反馈",
+        type="primary",
+        key=target_state_key("save_experimental_feedback", target_key),
+    ):
         save_experimental_feedback(result.rows, path)
         st.success(f"已保存 {len(result.rows)} 条 {label} 实验记录（含结果缺失记录）。")

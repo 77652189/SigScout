@@ -17,6 +17,7 @@ from sigscout.ui._shared import (
     _sorted_unique,
 )
 from sigscout.ui.experimental_browser import render_experimental_browser
+from sigscout.ui.target_state import commit_target_selector, prepare_target_selector
 
 
 def page_candidate_browser() -> None:
@@ -54,16 +55,16 @@ def render_representatives(subpage: str = "候选浏览") -> None:
     _render_downloads(result)
 
 
-def _select_experimental_target() -> str:
+def _select_experimental_target(widget_scope: str) -> str:
     options = list(FUSION_TARGET_PRESETS.keys())
-    current = str(st.session_state.get("fusion_target_key", "opn"))
-    index = options.index(current) if current in options else 0
+    widget_key = prepare_target_selector(widget_scope, options)
     return st.selectbox(
         "目标蛋白",
         options,
-        index=index,
         format_func=lambda key: FUSION_TARGET_PRESETS[key].label,
-        key="fusion_target_key",
+        key=widget_key,
+        on_change=commit_target_selector,
+        args=(widget_key, options),
     )
 
 
@@ -73,7 +74,7 @@ def _render_candidate_browser(representatives: pd.DataFrame) -> None:
         default="通用候选", key="candidate_browser_mode",
     )
     if mode == "目标实验视图":
-        target_key = _select_experimental_target()
+        target_key = _select_experimental_target("candidate_browser")
         render_experimental_browser(representatives, PATHS.local_runs_dir, target_key)
         return
     filtered = _render_candidate_filters(representatives)

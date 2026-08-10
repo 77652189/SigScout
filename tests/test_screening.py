@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from sigscout.adapters.uspnet import USPNetPrediction, USPNetRunResult
@@ -28,11 +29,11 @@ def test_signal_peptide_screening_compares_rules_and_uspnet(tmp_path: Path) -> N
     assert result.summary["uspnet_completed"] == 2
     assert result.summary["uspnet_passed"] == 1
     assert result.summary["consensus_passed"] == 1
-    assert result.summary["target_key"] == "opn"
-    assert result.summary["target_label"] == "OPN / 骨桥蛋白"
+    assert result.summary["target_key"] == "pichia_signal_peptide_library"
+    assert result.summary["target_label"] == "毕赤酵母信号肽库"
     assert result.summary["uniprot_query_at"]
-    assert all(row["target_key"] == "opn" for row in result.rows)
-    assert all(row["target_label"] == "OPN / 骨桥蛋白" for row in result.rows)
+    assert all(row["target_key"] == "pichia_signal_peptide_library" for row in result.rows)
+    assert all(row["target_label"] == "毕赤酵母信号肽库" for row in result.rows)
     rows_by_id = {row["candidate_id"]: row for row in result.rows}
     assert rows_by_id["OPN_UNIPROT_X12345"]["uspnet_prediction_label"] == "SP：经典 Sec/SPI 信号肽（默认通过）"
     assert rows_by_id["OPN_UNIPROT_X12345"]["uspnet_cleavage_sequence"] == "MKALLLALLALAAASAGA"
@@ -157,6 +158,36 @@ def test_refresh_preserves_completed_source_protein_annotations(tmp_path: Path) 
     by_accession = {row["accession"]: row for row in refreshed.rows}
     assert by_accession["X12345"]["source_protein_annotation_status"] == "已评估"
     assert by_accession["X12345"]["source_protein_route"] == "分泌/胞外倾向"
+
+
+def test_loading_historical_opn_metadata_normalizes_to_shared_library(tmp_path: Path) -> None:
+    service = SignalPeptideScreeningService(
+        tmp_path,
+        library_service=FakeLibraryService(),
+        uspnet_adapter=FakeMissingUSPNetAdapter(),
+    )
+    result = service.screen_uniprot_candidates(max_records=2)
+    assert result.comparison_csv and result.summary_json
+
+    with result.comparison_csv.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        fieldnames = list(rows[0])
+    for row in rows:
+        row["target_key"] = "opn"
+        row["target_label"] = "OPN / 骨桥蛋白"
+    with result.comparison_csv.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    summary = json.loads(result.summary_json.read_text(encoding="utf-8"))
+    summary.update({"target_key": "opn", "target_label": "OPN / 骨桥蛋白"})
+    result.summary_json.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+
+    loaded = service.load_persisted_screening_result()
+
+    assert loaded is not None
+    assert loaded.summary["target_key"] == "pichia_signal_peptide_library"
+    assert all(row["target_key"] == "pichia_signal_peptide_library" for row in loaded.rows)
 
 
 class FakeLibraryService:

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from sigscout.core.models import AA_PATTERN
@@ -10,6 +14,7 @@ from sigscout.services.fusion_scoring import score_construct
 
 
 CONSTRUCT_TYPES = ("AC", "ABC")
+CONSTRUCT_SCHEMA_VERSION = 2
 DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE = "APVNTTTEDETAQIPAEAVIGYSDLEGDFDVAVLPFSNSTNNGLLFINTTIASIAAKEEGVSLEKR"
 DEFAULT_OPN_TARGET_SEQUENCE = (
     "IPVKQADSGSSEEKQLYNKYPDAVATWLNPDPSQKQNLLAPQNAVSSEETNDFKQETLPSKSNESHDHMDDMDDEDDDDHVDSQDSIDSNDSDDVDDTDDSHQSDESHHSDESDELVTDFPTDLPATEVFTPVVPTVDTYDGRGDSVVYGLRSKSKKFRRPDIQYPDATDEDITSHMESEELNGAYKAIPVAQDLNAPSDWDSRGKDSYETSQLDDQSAETHSHKQSRLYKRKANDESNEHSDVIDSQELSKVSREFHSHEFHSHEDMLVVDPKSKEEDKHLKFRISHELDSASSEVN"
@@ -139,6 +144,76 @@ def fusion_constructs_to_csv(rows: list[dict[str, object]]) -> str:
     return rows_to_csv(rows)
 
 
+def save_fusion_construct_manifest(
+    rows: list[dict[str, object]],
+    output_dir: Path,
+    target_key: str,
+) -> Path:
+    errors = validate_fusion_constructs(rows, target_key)
+    if errors:
+        raise ValueError(" ".join(errors))
+    path = _fusion_construct_manifest_path(output_dir, target_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(fusion_constructs_to_csv(rows), encoding="utf-8")
+    temporary.replace(path)
+    return path
+
+
+def load_fusion_construct_manifest(
+    output_dir: Path,
+    target_key: str,
+) -> FusionConstructResult:
+    path = _fusion_construct_manifest_path(output_dir, target_key)
+    if not path.exists():
+        return FusionConstructResult([], [])
+    try:
+        reader = csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig")))
+        rows = [dict(row) for row in reader]
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        return FusionConstructResult([], [f"构建清单读取失败：{exc}"])
+    errors = validate_fusion_constructs(rows, target_key)
+    return FusionConstructResult([] if errors else rows, errors)
+
+
+def _fusion_construct_manifest_path(output_dir: Path, target_key: str) -> Path:
+    safe_target = _safe_id_component(target_key, "target").lower()
+    return Path(output_dir) / f"fusion_constructs_{safe_target}.csv"
+
+
+def validate_fusion_constructs(
+    rows: Iterable[dict[str, object]],
+    target_key: str,
+) -> list[str]:
+    errors: list[str] = []
+    safe_target = _safe_id_component(target_key, "target").lower()
+    for row in rows:
+        construct_id = str(row.get("construct_id", "")).strip()
+        if str(row.get("construct_schema_version", "")).strip() != str(CONSTRUCT_SCHEMA_VERSION):
+            errors.append("构建清单使用旧版 ID；请重新生成 FASTA 并重新计算定位结果。")
+            continue
+        if str(row.get("target_key", "")).strip().lower() != str(target_key).strip().lower():
+            errors.append("构建清单目标与当前目标不一致；请切换目标或重新生成 FASTA。")
+            continue
+        sequence = str(row.get("construct_sequence", "")).strip().upper()
+        try:
+            sequence_sha1 = hashlib.sha1(sequence.encode("ascii")).hexdigest() if sequence else ""
+        except UnicodeEncodeError:
+            sequence_sha1 = ""
+        if not sequence or str(row.get("construct_sequence_sha1", "")).strip().lower() != sequence_sha1:
+            errors.append("构建序列摘要不一致；请重新生成 FASTA 并重新计算定位结果。")
+            continue
+        expected_id = _build_construct_id(
+            target_key,
+            row.get("candidate_id", ""),
+            row.get("construct_type", ""),
+            sequence_sha1,
+        )
+        if construct_id != expected_id or not construct_id.startswith(f"{safe_target}__"):
+            errors.append("构建 ID 与目标或序列摘要不一致；请重新生成 FASTA 并重新计算定位结果。")
+    return list(dict.fromkeys(errors))
+
+
 def _construct_row(
     source: dict[str, object],
     candidate_id: str,
@@ -150,8 +225,11 @@ def _construct_row(
     target_label: str,
 ) -> dict[str, object]:
     sequence = a_sequence + b_sequence + c_sequence
+    sequence_sha1 = hashlib.sha1(sequence.encode("ascii")).hexdigest()
     row = {
-        "construct_id": f"{candidate_id}_{construct_type}",
+        "construct_id": _build_construct_id(target_key, candidate_id, construct_type, sequence_sha1),
+        "construct_schema_version": CONSTRUCT_SCHEMA_VERSION,
+        "construct_sequence_sha1": sequence_sha1,
         "candidate_id": candidate_id,
         "construct_type": construct_type,
         "target_key": target_key,
@@ -183,6 +261,23 @@ def _construct_row(
     return row
 
 
+def _safe_id_component(value: object, fallback: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip()).strip("_.-")
+    return safe or fallback
+
+
+def _build_construct_id(
+    target_key: object,
+    candidate_id: object,
+    construct_type: object,
+    sequence_sha1: str,
+) -> str:
+    safe_target = _safe_id_component(target_key, "target").lower()
+    safe_candidate = _safe_id_component(candidate_id, "candidate")
+    safe_type = _safe_id_component(construct_type, "construct")
+    return f"{safe_target}__{safe_candidate}__{safe_type}__{sequence_sha1[:12]}"
+
+
 def _sequence_risks(sequence: str) -> dict[str, object]:
     tail = sequence[-8:]
     c_tail = sequence[-35:]
@@ -209,9 +304,9 @@ def _processing_notes(
     notes: list[str] = []
     if construct_type == "AC":
         notes.append("A 直接连接 C；重点复核 A 的信号肽切割后 C 端起始残基。")
-    elif not b_sequence:
-        notes.append("ABC 未提供 B 序列。")
-    else:
+    elif construct_type in {"ABC", "BC"} and not b_sequence:
+        notes.append(f"{construct_type} 未提供 B 序列。")
+    elif construct_type in {"ABC", "BC"}:
         if b_ends_with_kex2:
             notes.append("B 末端带 Kex2 型碱性加工位点，适合作为 pro-region 辅助段候选。")
         else:

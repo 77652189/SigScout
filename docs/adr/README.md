@@ -9,3 +9,4 @@
 | [005](005-experimental-evidence-boundary.md) | accepted | 实验反馈按精确序列关联，并与定位评分保持独立。 |
 | [006](006-guided-exploration-not-yield-model.md) | accepted | 实验引导探索用于透明压缩候选，不作为产量模型。 |
 | [007](007-source-annotation-lifecycle.md) | accepted | 来源蛋白评估独立于刷新，并在刷新时保留已完成注释。 |
+| [008](008-target-sequence-construct-identity.md) | accepted | 融合构建由目标与完整序列摘要共同定义，旧定位结果不迁移。 |

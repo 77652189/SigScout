@@ -64,6 +64,91 @@ def _run_page_import_localization() -> None:
     page_import_localization()
 
 
+def _run_page_import_localization_with_hlf_construct() -> None:
+    import streamlit as st
+
+    from sigscout.services.fusion_constructs import build_fusion_constructs
+    from sigscout.ui.target_state import target_state_key
+    from sigscout.ui.views.fusion_localization import page_import_localization
+
+    st.session_state["fusion_target_key"] = "hlf"
+    st.session_state[target_state_key("fusion_construct_rows", "hlf")] = build_fusion_constructs(
+        [{"candidate_id": "TEST", "signal_peptide_sequence": "MKTLLA"}],
+        b_sequence="",
+        c_sequence="QWERTY",
+        target_key="hlf",
+        include_abc=False,
+        include_controls=False,
+    ).rows
+    page_import_localization()
+
+
+def _run_page_import_localization_from_manifest() -> None:
+    import os
+    from pathlib import Path
+
+    import sigscout.ui.views.fusion_localization as view
+    from sigscout.core.paths import ProjectPaths
+
+    original_paths = view.PATHS
+    view.PATHS = ProjectPaths(Path(os.environ["SIGSCOUT_TEST_PROJECT_ROOT"]))
+    try:
+        view.page_import_localization()
+    finally:
+        view.PATHS = original_paths
+
+
+def _run_generation_lookup_without_manifest_restore() -> None:
+    import os
+    from pathlib import Path
+
+    import streamlit as st
+
+    import sigscout.ui.views.fusion_localization as view
+    from sigscout.core.paths import ProjectPaths
+
+    original_paths = view.PATHS
+    view.PATHS = ProjectPaths(Path(os.environ["SIGSCOUT_TEST_PROJECT_ROOT"]))
+    try:
+        rows = view._target_construct_rows("hlf", load_manifest=False)
+        st.caption(f"rows={len(rows)}")
+    finally:
+        view.PATHS = original_paths
+
+
+def _run_batch_processing_notes_with_csv_booleans() -> None:
+    import pandas as pd
+
+    from sigscout.ui.views.fusion_localization import _render_batch_processing_notes
+
+    _render_batch_processing_notes(
+        pd.DataFrame(
+            [
+                {
+                    "construct_type": "C_ONLY",
+                    "has_er_retention_motif": "False",
+                    "processing_site_note": "ABC 未提供 B 序列。",
+                },
+                {
+                    "construct_type": "AC",
+                    "has_er_retention_motif": "False",
+                    "processing_site_note": "A 直接连接 C。",
+                }
+            ]
+        )
+    )
+
+
+def _run_scoped_fusion_target_selector() -> None:
+    import streamlit as st
+
+    from sigscout.ui.views.fusion_localization import _select_fusion_target
+
+    scope = str(st.session_state.get("test_target_selector_scope", "generation"))
+    selected, _ = _select_fusion_target(scope)
+    st.caption(f"selected={selected}")
+
+
 def _run_page_experimental_results() -> None:
     from sigscout.ui.views.experimental_feedback import page_experimental_results
 
@@ -125,11 +210,97 @@ def test_page_generate_constructs_smoke() -> None:
     assert at.subheader or at.markdown or at.metric or at.info or at.warning or at.error
 
 
+def test_fusion_target_switch_restores_target_specific_inputs() -> None:
+    at = AppTest.from_function(_run_page_generate_constructs)
+    at.session_state["fusion_target_key"] = "hlf"
+    at.session_state["fusion_b_sequence_hlf"] = "HLFB"
+    at.session_state["fusion_b_sequence_opn"] = "OPNB"
+
+    at.run()
+    assert at.text_area[0].key == "fusion_b_sequence_hlf"
+    assert at.text_area[0].value == "HLFB"
+
+    at.selectbox[0].set_value("opn")
+    at.run()
+    assert at.text_area[0].key == "fusion_b_sequence_opn"
+    assert at.text_area[0].value == "OPNB"
+
+    at.selectbox[0].set_value("hlf")
+    at.run()
+    assert at.text_area[0].value == "HLFB"
+
+
+def test_fusion_target_survives_selector_scope_change() -> None:
+    at = AppTest.from_function(_run_scoped_fusion_target_selector)
+    at.run()
+
+    at.selectbox[0].set_value("hlf")
+    at.run()
+    assert at.session_state["fusion_target_key"] == "hlf"
+
+    at.session_state["test_target_selector_scope"] = "import"
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["fusion_target_key"] == "hlf"
+    assert at.selectbox[0].value == "hlf"
+    assert any(caption.value == "selected=hlf" for caption in at.caption)
+
+
 def test_page_import_localization_smoke() -> None:
     at = AppTest.from_function(_run_page_import_localization)
     at.run()
     assert not at.exception
     assert at.subheader or at.markdown or at.metric or at.info or at.warning or at.error
+    assert len(at.get("file_uploader")) == 1
+
+
+def test_page_import_localization_keeps_hlf_constructs() -> None:
+    at = AppTest.from_function(_run_page_import_localization_with_hlf_construct)
+    at.run()
+    assert not at.exception
+    assert any("当前可匹配 1 条融合构建" in caption.value for caption in at.caption)
+
+
+def test_import_page_restores_target_manifest_after_session_loss(tmp_path, monkeypatch) -> None:
+    from sigscout.services.fusion_constructs import (
+        build_fusion_constructs,
+        save_fusion_construct_manifest,
+    )
+
+    project_root = tmp_path / "project"
+    output_dir = project_root / "local_runs" / "opn_signal_peptides"
+    rows = build_fusion_constructs(
+        [{"candidate_id": "TEST", "signal_peptide_sequence": "MKTLLA"}],
+        b_sequence="",
+        c_sequence="QWERTY",
+        target_key="hlf",
+        include_abc=False,
+        include_controls=False,
+    ).rows
+    save_fusion_construct_manifest(rows, output_dir, "hlf")
+    monkeypatch.setenv("SIGSCOUT_TEST_PROJECT_ROOT", str(project_root))
+
+    at = AppTest.from_function(_run_page_import_localization_from_manifest)
+    at.session_state["fusion_target_key"] = "hlf"
+    at.run()
+
+    assert not at.exception
+    assert any("当前可匹配 1 条融合构建" in caption.value for caption in at.caption)
+
+    generation = AppTest.from_function(_run_generation_lookup_without_manifest_restore)
+    generation.run()
+    assert not generation.exception
+    assert any(caption.value == "rows=0" for caption in generation.caption)
+
+
+def test_batch_processing_notes_parse_csv_false_as_false() -> None:
+    at = AppTest.from_function(_run_batch_processing_notes_with_csv_booleans)
+    at.run()
+
+    assert not at.exception
+    assert not any("ER 保留 motif" in markdown.value for markdown in at.markdown)
+    assert not any("ABC 未提供 B 序列" in markdown.value for markdown in at.markdown)
 
 
 def test_page_experimental_results_smoke() -> None:

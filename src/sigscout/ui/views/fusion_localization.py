@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from sigscout.core.coercion import safe_float
+from sigscout.core.coercion import safe_float, truthy
 from sigscout.services.experimental_evidence import (
     annotate_construct_experimental_evidence,
     build_target_experimental_candidates,
@@ -18,10 +18,14 @@ from sigscout.services.fusion_constructs import (
     build_fusion_constructs,
     fusion_constructs_to_csv,
     fusion_constructs_to_fasta,
+    load_fusion_construct_manifest,
+    save_fusion_construct_manifest,
+    validate_fusion_constructs,
 )
 from sigscout.services.fusion_scoring import score_construct, summarize_localization
 from sigscout.services.localization_import import import_localization_results
 from sigscout.ui._shared import PATHS, _load_representative_frames, _render_pagination_controls, _sorted_unique
+from sigscout.ui.target_state import commit_target_selector, prepare_target_selector, target_state_key
 
 
 def page_generate_constructs() -> None:
@@ -44,33 +48,46 @@ def render_fusion_localization(subpage: str = "生成定位评估文件") -> Non
         _render_localization_import_panel()
 
 
-def _select_fusion_target() -> tuple[str, object]:
+def _select_fusion_target(widget_scope: str) -> tuple[str, object]:
     options = list(FUSION_TARGET_PRESETS.keys())
-    current = str(st.session_state.get("fusion_target_key", "opn"))
-    index = options.index(current) if current in options else 0
+    widget_key = prepare_target_selector(widget_scope, options)
     selected = st.selectbox(
         "C 目标蛋白",
         options,
-        index=index,
         format_func=lambda key: FUSION_TARGET_PRESETS[key].label,
-        key="fusion_target_key",
-        help="切换目标后会自动替换 C 固定序列，并清空当前会话中的旧 AC/ABC 构建，避免跨目标混用。",
+        key=widget_key,
+        on_change=commit_target_selector,
+        args=(widget_key, options),
+        help="每个目标分别保存固定序列、构建选项和结果；切换后恢复该目标自己的状态。",
     )
     preset = FUSION_TARGET_PRESETS[selected]
-    applied = st.session_state.get("fusion_target_applied_key")
-    if applied != selected:
-        st.session_state["fusion_c_sequence"] = preset.sequence
-        st.session_state["fusion_target_applied_key"] = selected
-        if applied is not None:
-            _clear_fusion_session_rows()
     st.caption(f"{preset.note} 来源：{preset.source}；C 长度 {len(preset.sequence)} aa。")
     return selected, preset
 
 
-def _clear_fusion_session_rows() -> None:
-    for key in list(st.session_state.keys()):
-        if key in {"fusion_construct_rows", "fusion_construct_errors", "fusion_localization_rows"} or key.startswith("fusion_localization_rows_"):
-            st.session_state.pop(key, None)
+def _target_construct_rows(
+    target_key: str,
+    *,
+    load_manifest: bool = True,
+) -> list[dict[str, object]]:
+    scoped_key = target_state_key("fusion_construct_rows", target_key)
+    errors_key = target_state_key("fusion_construct_errors", target_key)
+    source_key = target_state_key("fusion_construct_rows_source", target_key)
+    scoped_rows = list(st.session_state.get(scoped_key, []))
+    if scoped_rows and not validate_fusion_constructs(scoped_rows, target_key):
+        if load_manifest or st.session_state.get(source_key) == "generated":
+            return scoped_rows
+    st.session_state.pop(scoped_key, None)
+    st.session_state.pop(source_key, None)
+    if not load_manifest:
+        return []
+    manifest = load_fusion_construct_manifest(PATHS.screening_output_dir, target_key)
+    if manifest.errors:
+        st.session_state[errors_key] = manifest.errors
+        return []
+    st.session_state.pop(errors_key, None)
+    return manifest.rows
+
 
 def _feedback_rows(target_key: str) -> pd.DataFrame:
     result = load_experimental_feedback(
@@ -84,9 +101,9 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
     st.markdown("**AC / ABC 融合蛋白定位评估文件**")
     st.caption("SigScout 只生成 FASTA 和导入外部结果；DeepLoc/BUSCA 请手动上传运行，避免把第三方网页服务当作 API 自动调用。")
     _render_deeploc_manual_workflow()
-    target_key, target_preset = _select_fusion_target()
+    target_key, target_preset = _select_fusion_target("fusion_generation")
     candidate_rows = representatives.copy()
-    selected_ids = set(st.session_state.get(f"fusion_selected_candidate_ids_{target_key}", []))
+    selected_ids = set(st.session_state.get(target_state_key("fusion_selected_candidate_ids", target_key), []))
     source_options = ["使用候选浏览已选项", "使用全部代表序列"]
     feedback = _feedback_rows(target_key)
     experimental = build_target_experimental_candidates(feedback, target_key)
@@ -101,7 +118,7 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
         source_options,
         index=0 if selected_ids else len(source_options) - 1,
         horizontal=True,
-        key=f"fusion_candidate_source_{target_key}",
+        key=target_state_key("fusion_candidate_source", target_key),
     )
     if source_mode == "使用候选浏览已选项":
         candidate_rows = candidate_rows[
@@ -116,7 +133,7 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
         value=DEFAULT_ALPHA_FACTOR_PRO_SEQUENCE,
         height=150,
         placeholder="粘贴氨基酸序列；支持带空格或换行",
-        key="fusion_b_sequence",
+        key=target_state_key("fusion_b_sequence", target_key),
         help="当前默认值为去除明显 pre-region 的 α-factor pro 区候选片段，末端保留 LEKR/Kex2 加工位点。",
     )
     c_sequence = input_cols[1].text_area(
@@ -124,26 +141,37 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
         value=target_preset.sequence,
         height=150,
         placeholder="粘贴目标蛋白氨基酸序列；支持带空格或换行",
-        key="fusion_c_sequence",
-        help="可用目标下拉自动填入，也可以临时手动编辑；切换目标会恢复该目标的默认 C 序列。",
+        key=target_state_key("fusion_c_sequence", target_key),
+        help="首次选择目标时填入预设序列；手动编辑后，切换回来会恢复该目标自己的输入。",
     )
     option_cols = st.columns([1.2, 1.2])
     construct_types = option_cols[0].multiselect(
         "构建类型",
         ["AC", "ABC"],
         default=["AC", "ABC"],
-        key="fusion_construct_types",
+        key=target_state_key("fusion_construct_types", target_key),
     )
-    include_controls = option_cols[1].checkbox("加入对照构建", value=True, key="fusion_include_controls")
+    include_controls = option_cols[1].checkbox(
+        "加入对照构建",
+        value=True,
+        key=target_state_key("fusion_include_controls", target_key),
+    )
     positive_control = st.text_area(
         "阳性对照 leader（可选，例如完整 α-factor prepro）",
         height=90,
         placeholder="留空则只生成 C_ONLY 和 BC 对照；粘贴序列后会额外生成 POSITIVE_CONTROL_C。",
-        key="fusion_positive_control",
+        key=target_state_key("fusion_positive_control", target_key),
     )
-    build_clicked = st.button("生成 AC/ABC 定位评估文件", type="secondary")
+    build_clicked = st.button(
+        "生成 AC/ABC 定位评估文件",
+        type="secondary",
+        key=target_state_key("fusion_build_constructs", target_key),
+    )
 
-    if build_clicked or st.session_state.get("fusion_construct_rows"):
+    construct_rows_key = target_state_key("fusion_construct_rows", target_key)
+    construct_errors_key = target_state_key("fusion_construct_errors", target_key)
+    restored_rows = [] if build_clicked else _target_construct_rows(target_key, load_manifest=False)
+    if build_clicked or restored_rows or st.session_state.get(construct_errors_key):
         if build_clicked:
             result = build_fusion_constructs(
                 candidate_rows.to_dict(orient="records"),
@@ -156,48 +184,65 @@ def _render_fusion_generation_panel(representatives: pd.DataFrame) -> None:
                 include_controls=include_controls,
                 positive_control_leader_sequence=positive_control,
             )
-            st.session_state["fusion_construct_rows"] = result.rows
-            st.session_state["fusion_construct_errors"] = result.errors
-            st.session_state["fusion_localization_rows"] = result.rows
-            st.session_state[f"fusion_localization_rows_{target_key}_deeploc"] = result.rows
-            st.session_state[f"fusion_localization_rows_{target_key}_busca"] = result.rows
-        errors = list(st.session_state.get("fusion_construct_errors", []))
-        construct_rows = list(st.session_state.get("fusion_construct_rows", []))
+            st.session_state[construct_rows_key] = result.rows
+            st.session_state[construct_errors_key] = result.errors
+            source_key = target_state_key("fusion_construct_rows_source", target_key)
+            if result.rows:
+                st.session_state[source_key] = "generated"
+            else:
+                st.session_state.pop(source_key, None)
+            st.session_state[target_state_key("fusion_localization_rows_deeploc", target_key)] = result.rows
+            st.session_state[target_state_key("fusion_localization_rows_busca", target_key)] = result.rows
+            if result.rows and not result.errors:
+                try:
+                    save_fusion_construct_manifest(result.rows, PATHS.screening_output_dir, target_key)
+                except (OSError, ValueError) as exc:
+                    st.session_state[construct_errors_key] = [f"构建清单保存失败：{exc}"]
+        errors = list(st.session_state.get(construct_errors_key, []))
+        construct_rows = (
+            list(st.session_state.get(construct_rows_key, []))
+            if build_clicked
+            else restored_rows
+        )
         if errors:
             for error in errors:
                 st.warning(error)
         if construct_rows:
             st.success(f"已生成 {len(construct_rows)} 条融合构建。")
-            _render_fusion_downloads(construct_rows)
+            _render_fusion_downloads(construct_rows, target_key)
 
 
 def _render_localization_import_panel() -> None:
     st.markdown("**导入 DeepLoc / BUSCA 结果**")
-    _select_fusion_target()
+    target_key, _ = _select_fusion_target("fusion_import")
     _render_deeploc_manual_workflow()
-    construct_rows = list(st.session_state.get("fusion_construct_rows", []))
+    construct_rows = _target_construct_rows(target_key)
+    for error in st.session_state.get(target_state_key("fusion_construct_errors", target_key), []):
+        st.warning(error)
     if not construct_rows:
-        st.info("当前会话还没有生成 AC/ABC 构建；如果已有缓存，会先直接展示缓存内容。重新上传外部结果前仍需先生成构建用于匹配。")
+        st.info("未找到当前目标的有效构建清单；上传入口仍可使用，但完成匹配前需要先重新生成 FASTA。")
     else:
         st.caption(f"当前可匹配 {len(construct_rows)} 条融合构建。")
     _render_localization_import(construct_rows)
 
 
-def _render_fusion_downloads(construct_rows: list[dict[str, object]]) -> None:
+def _render_fusion_downloads(construct_rows: list[dict[str, object]], target_key: str) -> None:
     fasta = fusion_constructs_to_fasta(construct_rows)
     csv_text = fusion_constructs_to_csv(construct_rows)
     cols = st.columns(3)
     cols[0].download_button(
         "下载 AC/ABC FASTA",
         fasta.encode("utf-8"),
-        file_name="fusion_constructs_ac_abc.fasta",
+        file_name=f"{target_key}_fusion_constructs_ac_abc.fasta",
         mime="text/plain",
+        key=target_state_key("fusion_download_constructs_fasta", target_key),
     )
     cols[1].download_button(
         "下载构建索引 CSV",
         csv_text.encode("utf-8-sig"),
-        file_name="fusion_constructs_ac_abc.csv",
+        file_name=f"{target_key}_fusion_constructs_ac_abc.csv",
         mime="text/csv",
+        key=target_state_key("fusion_download_constructs_csv", target_key),
     )
     cols[2].metric("构建数量", len(construct_rows))
 
@@ -255,9 +300,14 @@ def _render_deeploc_manual_workflow() -> None:
 
 def _render_localization_import(construct_rows: list[dict[str, object]]) -> None:
     st.markdown("**导入 DeepLoc / BUSCA 结果**")
-    tool_name = st.selectbox("结果来源", ["deeploc", "busca"], format_func=lambda value: value.upper())
     target_key = _current_fusion_target_key()
-    session_rows_key = f"fusion_localization_rows_{target_key}_{tool_name}"
+    tool_name = st.selectbox(
+        "结果来源",
+        ["deeploc", "busca"],
+        format_func=lambda value: value.upper(),
+        key=target_state_key("fusion_localization_tool", target_key),
+    )
+    session_rows_key = target_state_key(f"fusion_localization_rows_{tool_name}", target_key)
     cache_path = _localization_cache_path(tool_name, target_key)
     cached_rows, cached_count = _load_localization_cache(tool_name, construct_rows, target_key)
     cache_cols = st.columns([2.2, 1.0])
@@ -273,19 +323,28 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
         cache_cols[0].warning("检测到缓存文件，但无法读取有效 construct_id。")
     else:
         cache_cols[0].caption("当前没有可用的本地定位结果缓存。")
-    if cache_cols[1].button("清除当前缓存", disabled=not cache_path.exists(), key=f"{target_key}_{tool_name}_clear_localization_cache"):
+    if cache_cols[1].button(
+        "清除当前缓存",
+        disabled=not cache_path.exists(),
+        key=target_state_key(f"fusion_clear_localization_cache_{tool_name}", target_key),
+    ):
         cache_path.unlink(missing_ok=True)
         st.session_state[session_rows_key] = construct_rows
         st.success(f"已清除 {tool_name.upper()} 缓存。")
 
-    if construct_rows:
-        uploaded = st.file_uploader(
-            "上传 CSV/TSV 结果表",
-            type=["csv", "tsv", "txt"],
-            key=f"{tool_name}_localization_upload",
-        )
-        if uploaded is not None:
-            imported = import_localization_results(construct_rows, uploaded.getvalue(), tool_name=tool_name)
+    uploaded = st.file_uploader(
+        "上传 CSV/TSV 结果表",
+        type=["csv", "tsv", "txt"],
+        key=target_state_key(f"fusion_localization_upload_{tool_name}", target_key),
+    )
+    if uploaded is not None:
+        if construct_rows:
+            imported = import_localization_results(
+                construct_rows,
+                uploaded.getvalue(),
+                tool_name=tool_name,
+                target_key=target_key,
+            )
             if imported.errors:
                 for error in imported.errors:
                     st.warning(error)
@@ -293,9 +352,12 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
                 st.session_state[session_rows_key] = imported.rows
                 _save_localization_cache(tool_name, imported.rows, target_key)
                 st.success(f"已匹配 {imported.imported_count} 条 {tool_name.upper()} 结果。")
-    else:
-        st.caption("上传新的 DeepLoc/BUSCA 结果需要先生成当前 AC/ABC 构建，以便按 construct_id 匹配。")
+        else:
+            st.warning("结果文件已选择。请先到“生成定位评估文件”生成对应目标的 AC/ABC 构建，再返回本页完成匹配。")
     localization_rows = list(st.session_state.get(session_rows_key, construct_rows))
+    if not _localization_rows_match_manifest(localization_rows, construct_rows, target_key):
+        localization_rows = construct_rows
+        st.session_state[session_rows_key] = construct_rows
     if not localization_rows:
         return
     feedback = _feedback_rows(target_key)
@@ -369,12 +431,13 @@ def _render_localization_import(construct_rows: list[dict[str, object]]) -> None
         use_container_width=True,
     )
     _render_batch_processing_notes(frame)
-    _render_fusion_sequence_copy_panel(frame)
+    _render_fusion_sequence_copy_panel(frame, target_key)
     st.download_button(
         "下载合并定位结果 CSV",
         fusion_constructs_to_csv(frame.to_dict(orient="records")).encode("utf-8-sig"),
-        file_name="fusion_constructs_with_localization.csv",
+        file_name=f"{target_key}_{tool_name}_fusion_constructs_with_localization.csv",
         mime="text/csv",
+        key=target_state_key(f"fusion_download_localization_{tool_name}", target_key),
     )
 
 
@@ -420,10 +483,13 @@ def _render_batch_processing_notes(frame: pd.DataFrame) -> None:
     if frame.empty or "processing_site_note" not in frame.columns:
         return
     lines: list[str] = []
-    if "has_er_retention_motif" in frame.columns and bool(frame["has_er_retention_motif"].iloc[0]):
+    if "has_er_retention_motif" in frame.columns and truthy(frame["has_er_retention_motif"].iloc[0]):
         lines.append("C 末端存在 ER 保留 motif（KDEL/HDEL），可能影响分泌效率，建议复核。")
+    note_frame = frame
+    if "construct_type" in frame.columns:
+        note_frame = frame[frame["construct_type"].astype(str).isin(["AC", "ABC"])]
     seen_notes: set[str] = set()
-    for note in frame["processing_site_note"].astype(str):
+    for note in note_frame["processing_site_note"].astype(str):
         note = note.strip()
         if note and note not in seen_notes:
             seen_notes.add(note)
@@ -450,7 +516,7 @@ def _render_localization_summary(frame: pd.DataFrame) -> None:
     cols[4].metric("最佳构建", str(best.get("construct_id", ""))[:28])
 
 
-def _render_fusion_sequence_copy_panel(frame: pd.DataFrame) -> None:
+def _render_fusion_sequence_copy_panel(frame: pd.DataFrame, target_key: str) -> None:
     if frame.empty:
         return
     st.markdown("**融合序列复制区**")
@@ -461,19 +527,23 @@ def _render_fusion_sequence_copy_panel(frame: pd.DataFrame) -> None:
 
     control_cols = st.columns([1.0, 1.0, 2.2])
     type_options = ["全部", *_sorted_unique(candidate_frame["construct_type"])]
-    selected_type = control_cols[0].selectbox("构建类型", type_options, key="fusion_copy_type_filter")
+    selected_type = control_cols[0].selectbox(
+        "构建类型",
+        type_options,
+        key=target_state_key("fusion_copy_type_filter", target_key),
+    )
     page_size = control_cols[1].number_input(
         "每页数量",
         min_value=1,
         max_value=min(50, len(candidate_frame)),
         value=min(10, len(candidate_frame)),
         step=1,
-        key="fusion_copy_page_size",
+        key=target_state_key("fusion_copy_page_size", target_key),
     )
     search = control_cols[2].text_input(
         "搜索构建",
         placeholder="construct_id / candidate_id",
-        key="fusion_copy_search",
+        key=target_state_key("fusion_copy_search", target_key),
     )
 
     filtered = candidate_frame.copy()
@@ -490,8 +560,8 @@ def _render_fusion_sequence_copy_panel(frame: pd.DataFrame) -> None:
     _, _, start, end = _render_pagination_controls(
         total_items=len(filtered),
         page_size=int(page_size),
-        page_key="fusion_copy_page",
-        key_prefix="fusion_copy_top",
+        page_key=target_state_key("fusion_copy_page", target_key),
+        key_prefix=target_state_key("fusion_copy_top", target_key),
     )
     st.caption(f"第 {start}-{end} 条，共 {len(filtered)} 条融合构建")
     for _, row in filtered.iloc[start - 1 : end].iterrows():
@@ -499,8 +569,8 @@ def _render_fusion_sequence_copy_panel(frame: pd.DataFrame) -> None:
     _render_pagination_controls(
         total_items=len(filtered),
         page_size=int(page_size),
-        page_key="fusion_copy_page",
-        key_prefix="fusion_copy_bottom",
+        page_key=target_state_key("fusion_copy_page", target_key),
+        key_prefix=target_state_key("fusion_copy_bottom", target_key),
     )
 
 
@@ -586,8 +656,6 @@ def _current_fusion_target_key() -> str:
 def _localization_cache_path(tool_name: str, target_key: str | None = None) -> Path:
     safe_tool = "".join(ch for ch in tool_name.lower() if ch.isalnum() or ch in {"_", "-"}).strip("_-")
     safe_target = "".join(ch for ch in (target_key or _current_fusion_target_key()).lower() if ch.isalnum() or ch in {"_", "-"}).strip("_-")
-    if safe_target == "opn":
-        return PATHS.screening_output_dir / f"fusion_localization_{safe_tool or 'external'}.csv"
     return PATHS.screening_output_dir / f"fusion_localization_{safe_target or 'target'}_{safe_tool or 'external'}.csv"
 
 
@@ -617,8 +685,9 @@ def _load_localization_cache(
         for row in cached_frame.to_dict(orient="records")
         if str(row.get("construct_id", "")).strip()
     ]
-    if not construct_rows:
-        return cached_rows, len(cached_rows)
+    resolved_target = target_key or _current_fusion_target_key()
+    if not construct_rows or validate_fusion_constructs(cached_rows, resolved_target):
+        return construct_rows, 0
 
     cached_by_id = {
         str(row.get("construct_id", "")).strip(): row
@@ -642,13 +711,39 @@ def _load_localization_cache(
 
 
 def _cached_construct_matches(current: dict[str, object], cached: dict[str, object]) -> bool:
-    cached_sequence = str(cached.get("construct_sequence", "")).strip()
-    current_sequence = str(current.get("construct_sequence", "")).strip()
-    if cached_sequence and current_sequence:
-        return cached_sequence == current_sequence
-    cached_length = str(cached.get("construct_length", "")).strip()
-    current_length = str(current.get("construct_length", "")).strip()
-    return bool(cached_length and current_length and cached_length == current_length)
+    return all(
+        str(cached.get(field, "")).strip() == str(current.get(field, "")).strip()
+        for field in (
+            "construct_id",
+            "construct_schema_version",
+            "construct_sequence_sha1",
+            "target_key",
+        )
+    )
+
+
+def _localization_rows_match_manifest(
+    localization_rows: list[dict[str, object]],
+    construct_rows: list[dict[str, object]],
+    target_key: str,
+) -> bool:
+    if not localization_rows or not construct_rows:
+        return not localization_rows and not construct_rows
+    if validate_fusion_constructs(localization_rows, target_key):
+        return False
+    localized_by_id = {
+        str(row.get("construct_id", "")).strip(): row
+        for row in localization_rows
+    }
+    if set(localized_by_id) != {
+        str(row.get("construct_id", "")).strip()
+        for row in construct_rows
+    }:
+        return False
+    return all(
+        _cached_construct_matches(row, localized_by_id[str(row.get("construct_id", "")).strip()])
+        for row in construct_rows
+    )
 
 
 def _sort_localization_results(frame: pd.DataFrame) -> pd.DataFrame:

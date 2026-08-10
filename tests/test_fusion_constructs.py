@@ -8,6 +8,8 @@ from sigscout.services.fusion_constructs import (
     FUSION_TARGET_PRESETS,
     build_fusion_constructs,
     fusion_constructs_to_fasta,
+    load_fusion_construct_manifest,
+    save_fusion_construct_manifest,
 )
 from sigscout.services.fusion_scoring import score_construct, summarize_localization
 from sigscout.services.localization_import import import_localization_results
@@ -21,18 +23,61 @@ def test_build_fusion_constructs_exports_ac_and_abc() -> None:
     )
 
     assert result.errors == []
-    by_id = {row["construct_id"]: row for row in result.rows}
-    assert set(by_id) == {"CONTROL_C_ONLY", "CONTROL_BC", "SP_A_AC", "SP_A_ABC"}
-    assert by_id["CONTROL_C_ONLY"]["construct_sequence"] == "QWERTY"
-    assert by_id["SP_A_AC"]["construct_sequence"] == "MKAALLQWERTY"
-    assert by_id["SP_A_ABC"]["construct_sequence"] == "MKAALLEAEAQWERTY"
-    assert by_id["SP_A_ABC"]["b_length"] == 4
-    assert by_id["SP_A_AC"]["overall_priority"] == "待外部定位"
+    by_kind = {(row["candidate_id"], row["construct_type"]): row for row in result.rows}
+    assert set(by_kind) == {("CONTROL", "C_ONLY"), ("CONTROL", "BC"), ("SP_A", "AC"), ("SP_A", "ABC")}
+    assert by_kind[("CONTROL", "C_ONLY")]["construct_sequence"] == "QWERTY"
+    assert by_kind[("SP_A", "AC")]["construct_sequence"] == "MKAALLQWERTY"
+    assert by_kind[("SP_A", "ABC")]["construct_sequence"] == "MKAALLEAEAQWERTY"
+    assert by_kind[("SP_A", "ABC")]["b_length"] == 4
+    assert by_kind[("SP_A", "AC")]["overall_priority"] == "待外部定位"
 
     fasta = fusion_constructs_to_fasta(result.rows)
 
-    assert ">SP_A_AC|source=SP_A|type=AC|target=custom|len=12" in fasta
+    assert f">{by_kind[('SP_A', 'AC')]['construct_id']}|source=SP_A|type=AC|target=custom|len=12" in fasta
     assert "MKAALLEAEAQWERTY" in fasta
+
+
+def test_construct_identity_is_scoped_by_target_and_full_sequence() -> None:
+    common = {
+        "signal_rows": [_signal_row("SP A/1", "MKAALL")],
+        "b_sequence": "EAEA",
+        "include_abc": False,
+        "include_controls": False,
+    }
+    opn = build_fusion_constructs(c_sequence="QWERTY", target_key="opn", **common).rows[0]
+    hlf = build_fusion_constructs(c_sequence="QWERTY", target_key="hlf", **common).rows[0]
+    changed_a = build_fusion_constructs(
+        [_signal_row("SP A/1", "MKAALM")],
+        b_sequence="EAEA",
+        c_sequence="QWERTY",
+        target_key="opn",
+        include_abc=False,
+        include_controls=False,
+    ).rows[0]
+    changed_c = build_fusion_constructs(c_sequence="QWERTA", target_key="opn", **common).rows[0]
+    abc = build_fusion_constructs(
+        [_signal_row("SP A/1", "MKAALL")],
+        b_sequence="EAEA",
+        c_sequence="QWERTY",
+        target_key="opn",
+        include_ac=False,
+        include_controls=False,
+    ).rows[0]
+    changed_b = build_fusion_constructs(
+        [_signal_row("SP A/1", "MKAALL")],
+        b_sequence="EAEV",
+        c_sequence="QWERTY",
+        target_key="opn",
+        include_ac=False,
+        include_controls=False,
+    ).rows[0]
+
+    assert opn["construct_id"].startswith("opn__SP_A_1__AC__")
+    assert hlf["construct_id"].startswith("hlf__SP_A_1__AC__")
+    assert len(opn["construct_sequence_sha1"]) == 40
+    assert opn["construct_schema_version"] == 2
+    assert len({opn["construct_id"], hlf["construct_id"], changed_a["construct_id"], changed_c["construct_id"]}) == 4
+    assert abc["construct_id"] != changed_b["construct_id"]
 
 
 def test_build_fusion_constructs_rejects_invalid_fixed_sequence() -> None:
@@ -55,7 +100,7 @@ def test_default_alpha_factor_b_sequence_is_treated_as_pro_region() -> None:
     )
 
     assert result.errors == []
-    row = {row["construct_id"]: row for row in result.rows}["SP_A_ABC"]
+    row = next(row for row in result.rows if row["candidate_id"] == "SP_A" and row["construct_type"] == "ABC")
     assert row["b_ends_with_kex2_site"] is True
     assert row["b_pre_region_like"] is False
     assert "pro 区片段" in row["processing_site_note"]
@@ -102,7 +147,7 @@ def test_hlf_constructs_include_target_metadata() -> None:
 
     assert result.errors == []
     row = result.rows[0]
-    assert row["construct_id"] == "SP_A_AC"
+    assert row["construct_id"].startswith("hlf__SP_A__AC__")
     assert row["target_key"] == "hlf"
     assert row["target_label"] == "hLF / 人乳铁蛋白"
     assert row["c_length"] == 691
@@ -119,10 +164,12 @@ def test_positive_control_leader_generates_control_construct() -> None:
         positive_control_leader_sequence="MKAIL",
     )
 
-    by_id = {row["construct_id"]: row for row in result.rows}
-    assert "CONTROL_POSITIVE_CONTROL_C" in by_id
-    assert by_id["CONTROL_POSITIVE_CONTROL_C"]["construct_sequence"] == "MKAILQWERTY"
-    assert by_id["CONTROL_POSITIVE_CONTROL_C"]["overall_priority"] == "待外部定位"
+    positive = next(row for row in result.rows if row["construct_type"] == "POSITIVE_CONTROL_C")
+    assert positive["construct_sequence"] == "MKAILQWERTY"
+    assert positive["overall_priority"] == "待外部定位"
+    assert "ABC 未提供 B 序列" not in positive["processing_site_note"]
+    c_only = next(row for row in result.rows if row["construct_type"] == "C_ONLY")
+    assert "ABC 未提供 B 序列" not in c_only["processing_site_note"]
 
 
 def test_import_localization_results_merges_by_construct_id() -> None:
@@ -131,21 +178,80 @@ def test_import_localization_results_merges_by_construct_id() -> None:
         b_sequence="EAEA",
         c_sequence="QWERTY",
     ).rows
+    ids = {(row["candidate_id"], row["construct_type"]): row["construct_id"] for row in constructs}
     deeploc_csv = (
         "construct_id,Localization,Probability\n"
-        "SP_A_AC,Extracellular,0.91\n"
-        "SP_A_ABC,Endoplasmic reticulum,0.72\n"
+        f"{ids[('SP_A', 'AC')]},Extracellular,0.91\n"
+        f"{ids[('SP_A', 'ABC')]},Endoplasmic reticulum,0.72\n"
     )
 
-    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc")
+    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc", target_key="custom")
 
     assert imported.errors == []
     assert imported.imported_count == 2
-    by_id = {row["construct_id"]: row for row in imported.rows}
-    assert by_id["SP_A_AC"]["deeploc_localization"] == "Extracellular"
-    assert by_id["SP_A_ABC"]["deeploc_score"] == "0.72"
-    assert summarize_localization(by_id["SP_A_AC"])["external_secreted_signal"] is True
-    assert summarize_localization(by_id["SP_A_ABC"])["external_er_golgi_signal"] is True
+    by_kind = {(row["candidate_id"], row["construct_type"]): row for row in imported.rows}
+    assert by_kind[("SP_A", "AC")]["deeploc_localization"] == "Extracellular"
+    assert by_kind[("SP_A", "ABC")]["deeploc_score"] == "0.72"
+    assert summarize_localization(by_kind[("SP_A", "AC")])["external_secreted_signal"] is True
+    assert summarize_localization(by_kind[("SP_A", "ABC")])["external_er_golgi_signal"] is True
+
+
+def test_localization_import_rejects_wrong_target_and_legacy_constructs() -> None:
+    opn_constructs = build_fusion_constructs(
+        [_signal_row("SP_A", "MKAALL")],
+        b_sequence="EAEA",
+        c_sequence="QWERTY",
+        target_key="opn",
+        include_abc=False,
+        include_controls=False,
+    ).rows
+    hlf_constructs = build_fusion_constructs(
+        [_signal_row("SP_A", "MKAALL")],
+        b_sequence="EAEA",
+        c_sequence="QWERTY",
+        target_key="hlf",
+        include_abc=False,
+        include_controls=False,
+    ).rows
+    opn_id = str(opn_constructs[0]["construct_id"])
+    result_csv = f"construct_id,Localization\n{opn_id},Extracellular\n"
+
+    wrong_target = import_localization_results(
+        hlf_constructs,
+        result_csv,
+        tool_name="deeploc",
+        target_key="hlf",
+    )
+    legacy = import_localization_results(
+        [{"construct_id": "SP_A_AC", "target_key": "opn", "construct_sequence": "MKAALLQWERTY"}],
+        "construct_id,Localization\nSP_A_AC,Extracellular\n",
+        tool_name="deeploc",
+        target_key="opn",
+    )
+
+    assert wrong_target.imported_count == 0
+    assert any("目标" in error and "重新生成" in error for error in wrong_target.errors)
+    assert legacy.imported_count == 0
+    assert any("旧版" in error and "重新生成" in error for error in legacy.errors)
+
+
+def test_target_manifest_restores_constructs_after_session_loss(tmp_path) -> None:
+    rows = build_fusion_constructs(
+        [_signal_row("SP_A", "MKAALL")],
+        b_sequence="EAEA",
+        c_sequence="QWERTY",
+        target_key="hlf",
+        include_abc=False,
+        include_controls=False,
+    ).rows
+
+    path = save_fusion_construct_manifest(rows, tmp_path, "hlf")
+    restored = load_fusion_construct_manifest(tmp_path, "hlf")
+
+    assert path == tmp_path / "fusion_constructs_hlf.csv"
+    assert restored.errors == []
+    assert restored.rows[0]["construct_id"] == rows[0]["construct_id"]
+    assert restored.rows[0]["construct_sequence_sha1"] == rows[0]["construct_sequence_sha1"]
 
 
 def test_import_localization_results_reads_deeploc_flattened_fasta_header() -> None:
@@ -154,23 +260,26 @@ def test_import_localization_results_reads_deeploc_flattened_fasta_header() -> N
         b_sequence="EAEA",
         c_sequence="QWERTY",
     ).rows
+    ids = {(row["candidate_id"], row["construct_type"]): row["construct_id"] for row in constructs}
     deeploc_csv = (
         "Protein_ID,Localizations,Signals,Membrane types,Extracellular\n"
-        "PICHIA_UNIPROT_O74702_AC_source_PICHIA_UNIPROT_O74702_type_AC_len_314,Extracellular,Signal peptide,Soluble,0.92\n"
-        "PICHIA_UNIPROT_O74702_ABC_source_PICHIA_UNIPROT_O74702_type_ABC_len_380,Endoplasmic reticulum,Signal peptide,Soluble,0.71\n"
+        f"{ids[('PICHIA_UNIPROT_O74702', 'AC')]}_source_PICHIA_UNIPROT_O74702_type_AC_len_314,Extracellular,Signal peptide,Soluble,0.92\n"
+        f"{ids[('PICHIA_UNIPROT_O74702', 'ABC')]}_source_PICHIA_UNIPROT_O74702_type_ABC_len_380,Endoplasmic reticulum,Signal peptide,Soluble,0.71\n"
     )
 
-    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc")
+    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc", target_key="custom")
 
     assert imported.errors == []
     assert imported.imported_count == 2
-    by_id = {row["construct_id"]: row for row in imported.rows}
-    assert by_id["PICHIA_UNIPROT_O74702_AC"]["deeploc_localization"] == "Extracellular"
-    assert by_id["PICHIA_UNIPROT_O74702_ABC"]["deeploc_score"] == "0.71"
-    assert summarize_localization(by_id["PICHIA_UNIPROT_O74702_AC"])["external_membrane_risk"] is False
-    assert summarize_localization(by_id["PICHIA_UNIPROT_O74702_AC"])["external_vacuole_risk"] is False
-    assert by_id["PICHIA_UNIPROT_O74702_AC"]["localization_probability_score"] > 70
-    assert by_id["PICHIA_UNIPROT_O74702_AC"]["fine_priority_score"] > 0
+    by_kind = {(row["candidate_id"], row["construct_type"]): row for row in imported.rows}
+    ac = by_kind[("PICHIA_UNIPROT_O74702", "AC")]
+    abc = by_kind[("PICHIA_UNIPROT_O74702", "ABC")]
+    assert ac["deeploc_localization"] == "Extracellular"
+    assert abc["deeploc_score"] == "0.71"
+    assert summarize_localization(ac)["external_membrane_risk"] is False
+    assert summarize_localization(ac)["external_vacuole_risk"] is False
+    assert ac["localization_probability_score"] > 70
+    assert ac["fine_priority_score"] > 0
 
 
 def test_deeploc_risk_uses_probabilities_not_column_names() -> None:
@@ -180,15 +289,15 @@ def test_deeploc_risk_uses_probabilities_not_column_names() -> None:
         c_sequence="QWERTY",
         include_abc=False,
     ).rows
+    construct_id = next(row["construct_id"] for row in constructs if row["construct_type"] == "AC")
     deeploc_csv = (
         "Protein_ID,Localizations,Membrane types,Extracellular,Cell membrane,Lysosome/Vacuole,Transmembrane,Lipid anchor\n"
-        "SP_A_AC,Extracellular,Soluble,0.95,0.08,0.04,0.02,0.03\n"
+        f"{construct_id},Extracellular,Soluble,0.95,0.08,0.04,0.02,0.03\n"
     )
 
-    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc")
+    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc", target_key="custom")
 
-    by_id = {row["construct_id"]: row for row in imported.rows}
-    summary = summarize_localization(by_id["SP_A_AC"])
+    summary = summarize_localization(next(row for row in imported.rows if row["construct_type"] == "AC"))
     assert summary["external_secreted_signal"] is True
     assert summary["external_membrane_risk"] is False
     assert summary["external_vacuole_risk"] is False
@@ -262,17 +371,18 @@ def test_fine_priority_score_uses_deeploc_probability_tie_breakers() -> None:
         include_abc=False,
         include_controls=False,
     ).rows
+    ids = {row["candidate_id"]: row["construct_id"] for row in constructs}
     deeploc_csv = (
         "Protein_ID,Localizations,Membrane types,Extracellular,Soluble,Cell membrane,Lysosome/Vacuole,Transmembrane,Lipid anchor\n"
-        "SP_GOOD_AC,Extracellular,Soluble,0.96,0.94,0.04,0.03,0.02,0.02\n"
-        "SP_WEAK_AC,Extracellular,Soluble,0.58,0.52,0.42,0.22,0.18,0.12\n"
+        f"{ids['SP_GOOD']},Extracellular,Soluble,0.96,0.94,0.04,0.03,0.02,0.02\n"
+        f"{ids['SP_WEAK']},Extracellular,Soluble,0.58,0.52,0.42,0.22,0.18,0.12\n"
     )
 
-    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc")
+    imported = import_localization_results(constructs, deeploc_csv, tool_name="deeploc", target_key="custom")
 
-    by_id = {row["construct_id"]: row for row in imported.rows}
-    assert by_id["SP_GOOD_AC"]["fine_priority_score"] > by_id["SP_WEAK_AC"]["fine_priority_score"]
-    assert by_id["SP_GOOD_AC"]["localization_probability_score"] > by_id["SP_WEAK_AC"]["localization_probability_score"]
+    by_candidate = {row["candidate_id"]: row for row in imported.rows}
+    assert by_candidate["SP_GOOD"]["fine_priority_score"] > by_candidate["SP_WEAK"]["fine_priority_score"]
+    assert by_candidate["SP_GOOD"]["localization_probability_score"] > by_candidate["SP_WEAK"]["localization_probability_score"]
 
 
 def test_import_localization_results_reads_tsv_and_busca_prediction() -> None:
@@ -282,15 +392,16 @@ def test_import_localization_results_reads_tsv_and_busca_prediction() -> None:
         c_sequence="QWERTY",
         include_ac=False,
     ).rows
-    busca_tsv = "Sequence Name\tPrediction\tReliability\nSP_A_ABC\tPlasma membrane\tHigh\n"
+    construct_id = next(row["construct_id"] for row in constructs if row["construct_type"] == "ABC")
+    busca_tsv = f"Sequence Name\tPrediction\tReliability\n{construct_id}\tPlasma membrane\tHigh\n"
 
-    imported = import_localization_results(constructs, busca_tsv, tool_name="busca")
+    imported = import_localization_results(constructs, busca_tsv, tool_name="busca", target_key="custom")
 
     assert imported.imported_count == 1
-    by_id = {row["construct_id"]: row for row in imported.rows}
-    assert by_id["SP_A_ABC"]["busca_localization"] == "Plasma membrane"
-    assert summarize_localization(by_id["SP_A_ABC"])["external_membrane_risk"] is True
-    assert by_id["SP_A_ABC"]["overall_priority"] == "低"
+    abc = next(row for row in imported.rows if row["construct_type"] == "ABC")
+    assert abc["busca_localization"] == "Plasma membrane"
+    assert summarize_localization(abc)["external_membrane_risk"] is True
+    assert abc["overall_priority"] == "低"
 
 
 def _signal_row(candidate_id: str, sequence: str) -> dict[str, object]:

@@ -15,6 +15,7 @@ HARD_BOUNDARIES = {
     "短信号肽与完整 leader 不得在同一实验引导评分中直接混合比较。",
     "实验反馈只按精确氨基酸序列关联；仅 A 段一致不得表述为完整构建已经验证。",
     "目标专属实验反馈、融合构建和定位缓存不得跨目标复用。",
+    "融合构建身份必须同时包含目标边界、schema 版本与完整序列摘要；旧版定位结果不得自动迁移。",
     "未经明确授权，不提交、不推送、不改变远端可见性。",
 }
 
@@ -53,6 +54,7 @@ def test_adr_index_points_to_the_full_accepted_set() -> None:
         "005-experimental-evidence-boundary.md",
         "006-guided-exploration-not-yield-model.md",
         "007-source-annotation-lifecycle.md",
+        "008-target-sequence-construct-identity.md",
     }
     assert {path.name for path in adr_dir.glob("[0-9][0-9][0-9]-*.md")} == expected
     for name in expected:

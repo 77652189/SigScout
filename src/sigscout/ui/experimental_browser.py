@@ -11,6 +11,7 @@ from sigscout.services.experimental_evidence import (
 )
 from sigscout.services.experimental_feedback import load_experimental_feedback
 from sigscout.services.experimental_exploration import build_experiment_guided_exploration
+from sigscout.ui.target_state import target_state_key
 
 
 def render_experimental_browser(representatives: pd.DataFrame, local_runs_dir: Path, target_key: str) -> None:
@@ -34,10 +35,10 @@ def render_experimental_browser(representatives: pd.DataFrame, local_runs_dir: P
     if frame.empty:
         st.info("没有符合当前条件的候选。")
         return
-    page_size_key = f"{target_key}_exp_page_size"
+    page_size_key = target_state_key("experimental_browser_page_size", target_key)
     page_size = st.slider("每页展示数量", 1, min(50, len(frame)), min(12, len(frame)), key=page_size_key)
     total_pages = max(1, (len(frame) + page_size - 1) // page_size)
-    page_key = f"{target_key}_exp_page"
+    page_key = target_state_key("experimental_browser_page", target_key)
     page = min(int(st.session_state.get(page_key, 1)), total_pages)
     _pager(page, total_pages, "top", target_key)
     start = (page - 1) * page_size
@@ -130,7 +131,7 @@ def _render_guided_exploration(frame: pd.DataFrame, target_key: str) -> None:
         "探索池规模",
         [20, 40, 60],
         default=40,
-        key=f"{target_key}_exploration_panel_size",
+        key=target_state_key("experimental_exploration_panel_size", target_key),
     )
     cols[1].caption(
         "用短信号肽实验锚点压缩未测试范围；完整 leader 不与短信号肽混算。"
@@ -148,7 +149,7 @@ def _render_guided_exploration(frame: pd.DataFrame, target_key: str) -> None:
     metrics[3].metric("多样性保留", int(channel_counts.get("多样性保留", 0)))
     metrics[4].metric("机制对照", int(channel_counts.get("低表现邻域对照", 0)))
 
-    selection_key = f"fusion_selected_candidate_ids_{target_key}"
+    selection_key = target_state_key("fusion_selected_candidate_ids", target_key)
     selected = set(st.session_state.get(selection_key, []))
     panel_ids = set(panel["candidate_id"].astype(str))
     action_cols = st.columns([2.4, 1.2])
@@ -158,7 +159,7 @@ def _render_guided_exploration(frame: pd.DataFrame, target_key: str) -> None:
     )
     if action_cols[1].button(
         "将探索池加入融合评估",
-        key=f"add_exploration_panel_{target_key}_{len(panel)}",
+        key=target_state_key(f"add_exploration_panel_{len(panel)}", target_key),
         type="primary",
     ):
         st.session_state[selection_key] = sorted(selected | panel_ids)
@@ -250,7 +251,7 @@ def _filter_and_sort(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _cards(frame: pd.DataFrame, target_key: str) -> None:
-    selection_key = f"fusion_selected_candidate_ids_{target_key}"
+    selection_key = target_state_key("fusion_selected_candidate_ids", target_key)
     selected = set(st.session_state.get(selection_key, []))
     for _, row in frame.iterrows():
         candidate_id = str(row.get("candidate_id", ""))
@@ -260,7 +261,7 @@ def _cards(frame: pd.DataFrame, target_key: str) -> None:
             cols[0].caption(f"{row.get('experimental_unit_type', '')} · {row.get('source_note', '')}")
             if cols[1].button(
                 "移出融合评估" if candidate_id in selected else "加入融合评估",
-                key=f"{target_key}_select_{candidate_id}",
+                key=target_state_key(f"experimental_select_{candidate_id}", target_key),
                 type="secondary" if candidate_id in selected else "primary",
             ):
                 selected.remove(candidate_id) if candidate_id in selected else selected.add(candidate_id)
@@ -290,32 +291,46 @@ def _cards(frame: pd.DataFrame, target_key: str) -> None:
 
 
 def _selection_bar(position: str, target_key: str) -> None:
-    selection_key = f"fusion_selected_candidate_ids_{target_key}"
+    selection_key = target_state_key("fusion_selected_candidate_ids", target_key)
     selected = set(st.session_state.get(selection_key, []))
     cols = st.columns([2, 1, 1])
     cols[0].metric("已选融合候选", len(selected))
     with cols[1].popover("查看已选", disabled=not selected):
         for candidate_id in sorted(selected):
             st.write(candidate_id)
-    if cols[2].button("清空", key=f"{target_key}_clear_{position}", disabled=not selected):
+    if cols[2].button(
+        "清空",
+        key=target_state_key(f"experimental_clear_{position}", target_key),
+        disabled=not selected,
+    ):
         st.session_state[selection_key] = []
         st.rerun()
 
 
 def _pager(page: int, total_pages: int, position: str, target_key: str) -> None:
-    page_key = f"{target_key}_exp_page"
+    page_key = target_state_key("experimental_browser_page", target_key)
     cols = st.columns([1, 1, 2, 1, 1])
-    if cols[0].button("首页", key=f"{target_key}_first_{position}", disabled=page == 1):
+    if cols[0].button("首页", key=target_state_key(f"experimental_first_{position}", target_key), disabled=page == 1):
         st.session_state[page_key] = 1
         st.rerun()
-    if cols[1].button("上一页", key=f"{target_key}_prev_{position}", disabled=page == 1):
+    if cols[1].button("上一页", key=target_state_key(f"experimental_prev_{position}", target_key), disabled=page == 1):
         st.session_state[page_key] = page - 1
         st.rerun()
-    jump = cols[2].number_input("页码", 1, total_pages, page, key=f"{target_key}_jump_{position}")
-    if cols[3].button("跳转", key=f"{target_key}_go_{position}"):
+    jump = cols[2].number_input(
+        "页码",
+        1,
+        total_pages,
+        page,
+        key=target_state_key(f"experimental_jump_{position}", target_key),
+    )
+    if cols[3].button("跳转", key=target_state_key(f"experimental_go_{position}", target_key)):
         st.session_state[page_key] = int(jump)
         st.rerun()
-    if cols[4].button("下一页", key=f"{target_key}_next_{position}", disabled=page == total_pages):
+    if cols[4].button(
+        "下一页",
+        key=target_state_key(f"experimental_next_{position}", target_key),
+        disabled=page == total_pages,
+    ):
         st.session_state[page_key] = page + 1
         st.rerun()
     st.caption(f"第 {page} / {total_pages} 页")

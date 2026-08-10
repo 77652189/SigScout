@@ -5,6 +5,7 @@ import io
 import re
 from dataclasses import dataclass
 
+from sigscout.services.fusion_constructs import validate_fusion_constructs
 from sigscout.services.fusion_scoring import score_construct
 
 
@@ -54,11 +55,33 @@ def import_localization_results(
     content: bytes | str,
     *,
     tool_name: str,
+    target_key: str,
 ) -> LocalizationImportResult:
+    manifest_errors = validate_fusion_constructs(construct_rows, target_key)
+    if manifest_errors:
+        return LocalizationImportResult(construct_rows, manifest_errors, 0)
     text = content.decode("utf-8-sig") if isinstance(content, bytes) else str(content)
     table, errors = _read_delimited_table(text)
     if errors:
         return LocalizationImportResult(construct_rows, errors, 0)
+    supplied_ids = [
+        _normalize_id(_extract_first(row, LOCALIZATION_ID_COLUMNS))
+        for row in table
+        if _extract_first(row, LOCALIZATION_ID_COLUMNS)
+    ]
+    expected_prefix = f"{_safe_id_component(target_key).lower()}__"
+    if any("__" in construct_id and not construct_id.startswith(expected_prefix) for construct_id in supplied_ids):
+        return LocalizationImportResult(
+            construct_rows,
+            ["定位结果属于其他目标；请上传当前目标重新生成 FASTA 后计算的结果。"],
+            0,
+        )
+    if any("__" not in construct_id for construct_id in supplied_ids):
+        return LocalizationImportResult(
+            construct_rows,
+            ["定位结果使用旧版 construct_id；请重新生成 FASTA 并重新计算定位结果。"],
+            0,
+        )
     indexed = {_normalize_id(row.get("construct_id", "")): dict(row) for row in construct_rows}
     imported = 0
     for row in table:
@@ -80,7 +103,7 @@ def import_localization_results(
         indexed[key].update(score_construct(indexed[key]))
         imported += 1
     merged = [indexed[_normalize_id(row.get("construct_id", ""))] for row in construct_rows]
-    errors = [] if imported else [f"没有在 {tool_name} 结果中匹配到 construct_id。"]
+    errors = [] if imported else [f"没有在 {tool_name} 结果中匹配到当前构建；请重新生成 FASTA 并重新计算定位结果。"]
     return LocalizationImportResult(merged, errors, imported)
 
 
@@ -113,6 +136,10 @@ def _extract_first(row: dict[str, str], candidates: tuple[str, ...]) -> str:
 
 def _safe_column_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
+
+
+def _safe_id_component(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip()).strip("_.-") or "target"
 
 
 def _normalize_id(value: object) -> str:

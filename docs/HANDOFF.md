@@ -1,18 +1,18 @@
 # SigScout Handoff
 
 ```yaml
-slice_status: awaiting_authorization
-current_slice: none
-next_action: choose_authorized_direction
+slice_status: complete
+current_slice: fusion_target_isolation
+next_action: recompute_localization_results
 ```
 
 ## 当前目标
 
-等待下一项获得授权、具备验收标准的产品开发或验证切片。
+完成融合构建、定位结果和 Streamlit 业务状态的目标隔离，保留共享宿主信号肽候选库。旧定位结果不兼容 schema v2。
 
 ## 下一步
 
-从[执行计划](EXECUTION_PLAN.md)的待授权方向中选择下一项，或提供新的目标与验收标准。
+按目标重新生成 FASTA，在外部定位工具中重算并分别导入结果。后续产品开发仍需从[执行计划](EXECUTION_PLAN.md)选择或新增授权切片。
 
 ## 必读材料
 
@@ -23,7 +23,7 @@ next_action: choose_authorized_direction
 
 ## 验证方式
 
-按变更范围运行相关 pytest；修改 Python 结构后运行 `python -m compileall src tests sigscout`；修改 CLI 或 UI 时分别检查 CLI 帮助和受影响的 Streamlit 页面。页面级冒烟测试不能替代交互走查。
+本切片运行完整 pytest、`python -m compileall -q src tests sigscout` 与 `git diff --check`，并重启 Streamlit 检查目标切换、构建恢复和上传入口。页面级冒烟测试不能替代交互走查。
 
 ## 硬约束
 
@@ -36,5 +36,7 @@ next_action: choose_authorized_direction
 实验反馈只按精确氨基酸序列关联；仅 A 段一致不得表述为完整构建已经验证。
 
 目标专属实验反馈、融合构建和定位缓存不得跨目标复用。
+
+融合构建身份必须同时包含目标边界、schema 版本与完整序列摘要；旧版定位结果不得自动迁移。
 
 未经明确授权，不提交、不推送、不改变远端可见性。

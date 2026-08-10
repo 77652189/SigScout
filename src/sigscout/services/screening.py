@@ -60,8 +60,8 @@ class SignalPeptideScreeningService:
         library_service: SignalPeptideLibraryService | None = None,
         uspnet_adapter: USPNetAdapter | None = None,
         quickgo_source: QuickGOAnnotationSource | None = None,
-        target_key: str = "opn",
-        target_label: str = "OPN / 骨桥蛋白",
+        target_key: str = "pichia_signal_peptide_library",
+        target_label: str = "毕赤酵母信号肽库",
     ) -> None:
         self.output_dir = output_dir
         self.library_service = library_service or SignalPeptideLibraryService()
@@ -128,8 +128,8 @@ class SignalPeptideScreeningService:
             write_csv(paths["representatives_csv"], representative_rows)
             write_signal_peptide_fasta(paths["representatives_fasta"], representative_rows)
         summary = {key: value for key, value in payload.items() if key not in {"message", "errors"}}
-        summary.setdefault("target_key", self.target_key)
-        summary.setdefault("target_label", self.target_label)
+        summary["target_key"] = self.target_key
+        summary["target_label"] = self.target_label
         summary.setdefault("uniprot_candidate_source", "本地已保存的方法比较结果")
         summary.setdefault("uniprot_reused_from_disk", True)
         for key, value in _rules_score_distribution(rows).items():
@@ -674,8 +674,8 @@ def _representative_model_rows(rows: list[dict[str, object]]) -> list[dict[str, 
 def _ensure_target_context(row: dict[str, object], target_key: str, target_label: str) -> dict[str, object]:
     return {
         **row,
-        "target_key": str(row.get("target_key") or target_key),
-        "target_label": str(row.get("target_label") or target_label),
+        "target_key": target_key,
+        "target_label": target_label,
     }
 
 
